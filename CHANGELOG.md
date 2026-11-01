@@ -1,0 +1,24 @@
+# Changelog
+
+## 0.5.0
+
+- README (setup, recommended models, privacy, troubleshooting) and this changelog
+- Mocked-API tests for the Ollama client, and integration tests in a real VS Code against a fake Ollama (`npm run test:integration`)
+
+## 0.4.0
+
+- Longer timeout for cold models, 10 s offline backoff, error handling per state transition
+- Debug metrics line per request (timings and sizes only), `npm run bench`
+
+## 0.3.0
+
+- Built-in FIM templates (Qwen, CodeGemma, DeepSeek, StarCoder, CodeLlama) for models without native insert
+- Single- and multi-line modes, output cleanup (fences, repeats, suffix overlap, prose, truncation), import-block context
+
+## 0.2.0
+
+- Model picker and status bar, six commands, missing-model and non-local-endpoint warnings, abort on model switch
+
+## 0.1.0
+
+- First version: ghost-text completions from an Ollama model set in settings

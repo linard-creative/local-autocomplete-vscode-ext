@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install)",
+      "Bash(npm run build)",
+      "Bash(npm run typecheck)",
+      "Bash(npm run lint)",
+      "Bash(npm test)",
+      "Bash(npm run package)",
+      "Bash(npx vitest *)",
+      "Bash(curl -s http://127.0.0.1:11434/*)",
+      "Bash(ollama list)",
+      "Bash(ollama ps)"
+    ],
+    "deny": [
+      "Bash(ollama pull *)",
+      "Bash(ollama rm *)"
+    ]
+  }
+}

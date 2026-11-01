@@ -1,0 +1,175 @@
+{
+  "name": "local-autocomplete",
+  "displayName": "Local Autocomplete",
+  "description": "Inline code completions from your local Ollama models. No cloud, no telemetry.",
+  "version": "0.5.0",
+  "publisher": "linard-creative",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/linard-creative/local-autocomplete-vscode-ext.git"
+  },
+  "private": true,
+  "engines": {
+    "vscode": "^1.101.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Machine Learning"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "configuration": {
+      "title": "Local Autocomplete",
+      "properties": {
+        "localAutocomplete.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inline completions."
+        },
+        "localAutocomplete.endpoint": {
+          "type": "string",
+          "default": "http://127.0.0.1:11434",
+          "scope": "machine",
+          "description": "Ollama base URL. Machine-scoped so a workspace cannot redirect your code to another server."
+        },
+        "localAutocomplete.model": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Ollama model name, e.g. qwen2.5-coder:7b."
+        },
+        "localAutocomplete.requestTimeoutMs": {
+          "type": "integer",
+          "default": 5000,
+          "minimum": 500,
+          "maximum": 60000,
+          "description": "Abort inference after this many milliseconds."
+        },
+        "localAutocomplete.debounceMs": {
+          "type": "integer",
+          "default": 250,
+          "minimum": 0,
+          "maximum": 2000,
+          "description": "Wait this long after the last keystroke before requesting a completion."
+        },
+        "localAutocomplete.maxTokens": {
+          "type": "integer",
+          "default": 128,
+          "minimum": 1,
+          "maximum": 1024,
+          "description": "Maximum tokens to generate (num_predict)."
+        },
+        "localAutocomplete.temperature": {
+          "type": "number",
+          "default": 0.2,
+          "minimum": 0,
+          "maximum": 2,
+          "description": "Sampling temperature."
+        },
+        "localAutocomplete.maxContextChars": {
+          "type": "integer",
+          "default": 6000,
+          "minimum": 500,
+          "maximum": 100000,
+          "description": "Characters of code around the cursor sent to the model."
+        },
+        "localAutocomplete.numCtx": {
+          "type": "integer",
+          "default": 4096,
+          "minimum": 512,
+          "maximum": 131072,
+          "description": "Model context window (num_ctx)."
+        },
+        "localAutocomplete.keepAlive": {
+          "type": "string",
+          "default": "30m",
+          "description": "How long Ollama keeps the model loaded after the last request, e.g. 30m, 1h, or -1 for forever."
+        },
+        "localAutocomplete.disabledLanguages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "plaintext",
+            "markdown",
+            "scminput"
+          ],
+          "description": "Language ids where completions are off."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "localAutocomplete.enable",
+        "title": "Enable Autocomplete",
+        "category": "Local Autocomplete"
+      },
+      {
+        "command": "localAutocomplete.disable",
+        "title": "Disable Autocomplete",
+        "category": "Local Autocomplete"
+      },
+      {
+        "command": "localAutocomplete.selectModel",
+        "title": "Select Autocomplete Model",
+        "category": "Local Autocomplete"
+      },
+      {
+        "command": "localAutocomplete.refreshModels",
+        "title": "Refresh Available Models",
+        "category": "Local Autocomplete"
+      },
+      {
+        "command": "localAutocomplete.testConnection",
+        "title": "Test Ollama Connection",
+        "category": "Local Autocomplete"
+      },
+      {
+        "command": "localAutocomplete.openSettings",
+        "title": "Open Extension Settings",
+        "category": "Local Autocomplete"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "localAutocomplete.enable",
+          "when": "!config.localAutocomplete.enabled"
+        },
+        {
+          "command": "localAutocomplete.disable",
+          "when": "config.localAutocomplete.enabled"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:integration": "node esbuild.mjs && esbuild test/integration/run.ts test/integration/suite.ts --bundle --platform=node --format=cjs --packages=external --outdir=dist/test --log-level=warning && node dist/test/run.js",
+    "vscode:prepublish": "node esbuild.mjs --production",
+    "package": "node -e \"require('fs').mkdirSync('output',{recursive:true})\" && vsce package --no-dependencies --out output/",
+    "install:ext": "npm run package && node -e \"require('child_process').execSync('code --install-extension output/local-autocomplete-' + process.env.npm_package_version + '.vsix --force', { stdio: 'inherit' })\"",
+    "uninstall:ext": "code --uninstall-extension linard-creative.local-autocomplete",
+    "bench": "esbuild scripts/bench.ts --bundle --platform=node --format=esm --outfile=dist/bench.mjs --log-level=warning && node dist/bench.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/vscode": "~1.101.0",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.1.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.14.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^5.0.5"
+  }
+}
