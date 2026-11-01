@@ -1,13 +1,41 @@
 import { basename } from 'node:path';
 import * as vscode from 'vscode';
-import { buildContext } from './context';
+import type { Settings } from './config';
+import { buildContext, isSecretFile } from './context';
 import { cleanCompletion } from './filter';
 import { settings, type ModelService } from './models';
 import { generate, OllamaError } from './ollama';
-import { buildRequest } from './prompt';
+import { buildRequest, recentBlock, type RecentFile } from './prompt';
 
 // Covers Ollama loading the model into memory, which can take several seconds.
 const COLD_TIMEOUT_MS = 30_000;
+
+// Relative path only: absolute paths leak usernames and folder layout into the prompt.
+const relPath = (uri: vscode.Uri) =>
+  vscode.workspace.getWorkspaceFolder(uri) ? vscode.workspace.asRelativePath(uri, false) : basename(uri.path);
+
+/**
+ * Line of each top-level symbol and of each member of a class-like one, in file order.
+ * shortcut: only the first line of a multi-line signature, upgrade if outlines look truncated in practice.
+ */
+function outlineText(doc: vscode.TextDocument, symbols: (vscode.DocumentSymbol | vscode.SymbolInformation)[]): string {
+  // Members of these belong in the outline; a function's children are its locals.
+  const containers = [vscode.SymbolKind.Class, vscode.SymbolKind.Interface, vscode.SymbolKind.Struct, vscode.SymbolKind.Enum,
+    vscode.SymbolKind.Module, vscode.SymbolKind.Namespace];
+  const lines = new Set<number>();
+  const walk = (list: (vscode.DocumentSymbol | vscode.SymbolInformation)[], top: boolean) => {
+    for (const sym of list) {
+      if (!('selectionRange' in sym)) {
+        lines.add(sym.location.range.start.line); // flat SymbolInformation from older providers
+        continue;
+      }
+      lines.add(sym.selectionRange.start.line);
+      if (top && containers.includes(sym.kind)) walk(sym.children, false);
+    }
+  };
+  walk(symbols, true);
+  return [...lines].sort((a, b) => a - b).map((l) => doc.lineAt(l).text.trimEnd()).join('\n') + '\n';
+}
 
 function delay(ms: number, token: vscode.CancellationToken): Promise<boolean> {
   if (token.isCancellationRequested) return Promise.resolve(false);
@@ -25,6 +53,9 @@ function delay(ms: number, token: vscode.CancellationToken): Promise<boolean> {
 
 export class LocalInlineCompletionProvider implements vscode.InlineCompletionItemProvider {
   private current?: AbortController;
+  /** File URIs in the order they were last active, most recent first. Persisted per workspace by extension.ts. */
+  recent: string[] = [];
+  private outlines = new Map<string, { version: number; text?: string }>();
 
   constructor(
     private readonly log: vscode.LogOutputChannel,
@@ -36,6 +67,55 @@ export class LocalInlineCompletionProvider implements vscode.InlineCompletionIte
     this.current?.abort();
   }
 
+  noteActive(document: vscode.TextDocument): void {
+    if (document.uri.scheme !== 'file') return;
+    const key = document.uri.toString();
+    // 10 is the recentTabsCount maximum, plus the current file.
+    this.recent = [key, ...this.recent.filter((k) => k !== key)].slice(0, 11);
+    for (const k of this.outlines.keys()) if (!this.recent.includes(k)) this.outlines.delete(k);
+  }
+
+  /** Recently active files still open in a tab, minus the current one, files outside the workspace, secrets and disabled languages. */
+  private async recentFiles(current: vscode.TextDocument, s: Settings): Promise<RecentFile[]> {
+    const tabs = new Set(
+      vscode.window.tabGroups.all.flatMap((g) =>
+        g.tabs.map((t) => (t.input instanceof vscode.TabInputText ? t.input.uri.toString() : '')),
+      ),
+    );
+    const loaded = new Map(vscode.workspace.textDocuments.map((d) => [d.uri.toString(), d]));
+    const files: RecentFile[] = [];
+    for (const key of this.recent) {
+      if (files.length === s.recentTabsCount) break;
+      const uri = vscode.Uri.parse(key);
+      if (key === current.uri.toString() || !tabs.has(key) || !vscode.workspace.getWorkspaceFolder(uri) || isSecretFile(uri.fsPath))
+        continue;
+      // Tabs restored after a restart aren't loaded until shown; opening reads the file without showing it.
+      const doc = loaded.get(key) ?? (await vscode.workspace.openTextDocument(uri).then((d) => d, () => undefined));
+      if (!doc || s.disabledLanguages.includes(doc.languageId)) continue;
+      files.push({ path: relPath(uri), languageId: doc.languageId, text: this.outline(doc) });
+    }
+    return files.reverse(); // most recent last, nearest the cursor
+  }
+
+  /**
+   * Declaration lines from the language's symbol provider, cached per document version so the prompt start stays stable.
+   * Never waits for it: returns the full text (cut to a head by recentBlock) until the symbols arrive, or if there are none.
+   */
+  private outline(doc: vscode.TextDocument): string {
+    const key = doc.uri.toString();
+    const hit = this.outlines.get(key);
+    if (hit?.version === doc.version) return hit.text ?? doc.getText();
+    const entry: { version: number; text?: string } = { version: doc.version };
+    this.outlines.set(key, entry);
+    void vscode.commands
+      .executeCommand<(vscode.DocumentSymbol | vscode.SymbolInformation)[] | undefined>('vscode.executeDocumentSymbolProvider', doc.uri)
+      .then(
+        (symbols) => (entry.text = symbols?.length ? outlineText(doc, symbols) : undefined),
+        () => undefined,
+      );
+    return doc.getText();
+  }
+
   async provideInlineCompletionItems(
     document: vscode.TextDocument,
     position: vscode.Position,
@@ -44,7 +124,7 @@ export class LocalInlineCompletionProvider implements vscode.InlineCompletionIte
   ): Promise<vscode.InlineCompletionItem[] | undefined> {
     const s = settings();
     if (!s.enabled || !s.model || s.model === this.models.missing) return;
-    if (s.disabledLanguages.includes(document.languageId)) return;
+    if (s.disabledLanguages.includes(document.languageId) || isSecretFile(document.fileName)) return;
     // IntelliSense has a selection: stay out of the language server's way.
     if (context.selectedCompletionInfo) return;
     // Cursor inside an identifier: completions there are almost always wrong.
@@ -61,11 +141,9 @@ export class LocalInlineCompletionProvider implements vscode.InlineCompletionIte
     try {
       const profile = await this.models.profile(s, signal);
       const ctx = buildContext(document.getText(), document.offsetAt(position), s.maxContextChars);
-      // Relative path only: absolute paths leak usernames and folder layout into the prompt.
-      const path = vscode.workspace.getWorkspaceFolder(document.uri)
-        ? vscode.workspace.asRelativePath(document.uri, false)
-        : basename(document.uri.path);
-      const body = buildRequest(ctx, { path, languageId: document.languageId }, profile, s);
+      // Recent tabs get a quarter of the current file's budget on top of it.
+      const recent = s.recentTabs ? recentBlock(await this.recentFiles(document, s), Math.floor(s.maxContextChars / 4)) : '';
+      const body = buildRequest(ctx, { path: relPath(document.uri), languageId: document.languageId }, profile, s, recent);
 
       const started = Date.now();
       const res = await generate(s.endpoint, body, signal);
@@ -78,7 +156,7 @@ export class LocalInlineCompletionProvider implements vscode.InlineCompletionIte
       const ms = (ns?: number) => (ns === undefined ? '?' : Math.round(ns / 1e6));
       const tokS = res.eval_count && res.eval_duration ? (res.eval_count / (res.eval_duration / 1e9)).toFixed(1) : '?';
       this.log.debug(
-        `model=${s.model} prompt_chars=${body.prompt.length} total_ms=${Date.now() - started} load_ms=${ms(res.load_duration)} eval_count=${res.eval_count ?? '?'} tok_s=${tokS} done=${res.done_reason ?? '?'} outcome=${stale ? 'stale' : text ? 'shown' : 'empty'}`,
+        `model=${s.model} prompt_chars=${body.prompt.length} recent_chars=${recent.length} total_ms=${Date.now() - started} load_ms=${ms(res.load_duration)} prompt_eval=${res.prompt_eval_count ?? '?'} prompt_ms=${ms(res.prompt_eval_duration)} eval_count=${res.eval_count ?? '?'} tok_s=${tokS} done=${res.done_reason ?? '?'} outcome=${stale ? 'stale' : text ? 'shown' : 'empty'}`,
       );
       return text ? [new vscode.InlineCompletionItem(text, new vscode.Range(position, position))] : undefined;
     } catch (e) {

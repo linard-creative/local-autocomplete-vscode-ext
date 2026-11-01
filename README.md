@@ -47,6 +47,7 @@ All are under **Local Autocomplete** in the Command Palette:
 - **Enable / Disable Autocomplete**
 - **Refresh Available Models**: re-reads the model list and capabilities
 - **Test Ollama Connection**: shows the Ollama version, or why it can't connect
+- **Toggle Recent Tabs Context**: turns recent-tab context on or off. The status bar tooltip shows the current state.
 - **Open Extension Settings**
 
 ## Settings
@@ -64,14 +65,16 @@ All are under **Local Autocomplete** in the Command Palette:
 | `localAutocomplete.numCtx` | `4096` | Model context window |
 | `localAutocomplete.keepAlive` | `30m` | How long Ollama keeps the model loaded after the last request |
 | `localAutocomplete.disabledLanguages` | `plaintext`, `markdown`, `scminput` | Language ids with no completions |
+| `localAutocomplete.recentTabs` | `true` | Also send an outline (declarations, no function bodies) of your most recently used open files, so suggestions know names from other files |
+| `localAutocomplete.recentTabsCount` | `3` | How many recent tabs to include (1–10) |
 
 ## Privacy
 
-- The only network peer is the configured endpoint. Only the current file is sent: the code around the cursor and its workspace-relative path, never the absolute path.
+- The only network peer is the configured endpoint. What is sent: the code around the cursor and its workspace-relative path, never the absolute path. With **Recent Tabs** on, also an outline of your 3 most recently used tabs that are still open inside the workspace: their declaration lines, or the top of the file until the outline is ready.
 - `endpoint` and `model` are machine-scoped. A cloned repository's `.vscode/settings.json` cannot redirect your code to another server.
 - A non-local endpoint (anything other than `localhost`, `127.x` or `::1`) shows a warning once per session.
 - The **Local Autocomplete** output channel logs metadata only (model, timings, sizes), never code, prompts or completions.
-- **Secret files:** completions run in every language not listed in `disabledLanguages`. To keep files like `.env` out of prompts, add their language id, e.g. `"localAutocomplete.disabledLanguages": ["plaintext", "markdown", "scminput", "dotenv", "properties"]`. Check a file's id via **Change Language Mode** in the status bar.
+- **Secret files:** `.env` and `.env.*`, `.envrc`, `.npmrc`, `.pypirc`, `.netrc`, `.git-credentials`, SSH private keys, `credentials` files, `secrets.json`/`.yaml`, `local.settings.json`, and `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.tfvars`, `*.tfstate` never get completions and are never sent as recent-tab context, even to a local Ollama. To exclude other files, add their language id to `disabledLanguages`. Check a file's id via **Change Language Mode** in the status bar.
 
 ## Troubleshooting
 

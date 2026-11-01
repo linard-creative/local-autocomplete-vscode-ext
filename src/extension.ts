@@ -16,10 +16,18 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const models = new ModelService(log, render);
   provider = new LocalInlineCompletionProvider(log, models);
+  // Restored so recent tabs work right after a restart; stays in VS Code's local storage for this workspace.
+  provider.recent = context.workspaceState.get<string[]>('recentTabs', []);
+  const noteActive = (editor?: vscode.TextEditor) => {
+    if (!editor || !provider) return;
+    provider.noteActive(editor.document);
+    void context.workspaceState.update('recentTabs', provider.recent);
+  };
+  noteActive(vscode.window.activeTextEditor);
 
   function render(): void {
     const s = settings();
-    status.tooltip = `Autocomplete Model: ${s.model || 'none'} (click to change)`;
+    status.tooltip = `Autocomplete Model: ${s.model || 'none'} (click to change)\nRecent tabs: ${s.recentTabs ? `on (${s.recentTabsCount})` : 'off'}`;
     if (endpointProblem(s.endpoint) === 'invalid') status.text = '$(error) Invalid endpoint';
     else if (!s.enabled) status.text = '$(circle-slash) Autocomplete off';
     else if (!s.model) status.text = '$(sparkle) Select model';
@@ -68,6 +76,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('localAutocomplete.openSettings', () =>
       vscode.commands.executeCommand('workbench.action.openSettings', '@ext:linard-creative.local-autocomplete'),
     ),
+    vscode.commands.registerCommand('localAutocomplete.toggleRecentTabs', () =>
+      config().update('recentTabs', !settings().recentTabs, vscode.ConfigurationTarget.Global),
+    ),
+    vscode.window.onDidChangeActiveTextEditor(noteActive),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (!e.affectsConfiguration('localAutocomplete')) return;
       if (e.affectsConfiguration('localAutocomplete.endpoint')) {

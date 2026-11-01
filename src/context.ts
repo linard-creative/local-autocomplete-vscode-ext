@@ -46,5 +46,11 @@ export function buildContext(text: string, offset: number, budget: number): Comp
   return { prefix: head + prefix, suffix };
 }
 
+// Files that commonly hold secrets (spec §14): never completed in, never sent as recent-tab context.
+const SECRET =
+  /(^|[\\/])(\.env(\..*)?|\.envrc|\.npmrc|\.pypirc|\.netrc|\.pgpass|\.htpasswd|\.git-credentials|id_(rsa|dsa|ecdsa|ed25519)|credentials(\.(json|ya?ml|toml|ini|txt))?|secrets?\.(json|ya?ml|toml|env|txt)|local\.settings\.json|[^\\/]*\.(pem|key|p12|pfx|jks|keystore|tfvars|tfstate(\.backup)?))$/i;
+
+export const isSecretFile = (path: string): boolean => SECRET.test(path);
+
 /** Code after the cursor on the same line means the completion must fit in that line. */
 export const isSingleLine = (ctx: CompletionContext): boolean => /\S/.test(ctx.suffix.split('\n', 1)[0]);

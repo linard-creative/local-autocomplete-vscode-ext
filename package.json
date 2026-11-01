@@ -2,7 +2,7 @@
   "name": "local-autocomplete",
   "displayName": "Local Autocomplete",
   "description": "Inline code completions from your local Ollama models. No cloud, no telemetry.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "publisher": "linard-creative",
   "license": "MIT",
   "repository": {
@@ -100,6 +100,18 @@
             "scminput"
           ],
           "description": "Language ids where completions are off."
+        },
+        "localAutocomplete.recentTabs": {
+          "type": "boolean",
+          "default": true,
+          "description": "Also send the top of your most recently used open files as context, so suggestions know names from other files. Secret files (.env, keys, credentials) are never sent."
+        },
+        "localAutocomplete.recentTabsCount": {
+          "type": "integer",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 10,
+          "description": "How many recently used open files to include when Recent Tabs is on."
         }
       }
     },
@@ -127,6 +139,11 @@
       {
         "command": "localAutocomplete.testConnection",
         "title": "Test Ollama Connection",
+        "category": "Local Autocomplete"
+      },
+      {
+        "command": "localAutocomplete.toggleRecentTabs",
+        "title": "Toggle Recent Tabs Context",
         "category": "Local Autocomplete"
       },
       {

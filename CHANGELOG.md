@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.0
+
+- Recent tabs context: an outline (declaration lines from VS Code's symbol provider) of your 3 most recently used open tabs is sent along with the current file (`recentTabs`, `recentTabsCount`, **Toggle Recent Tabs Context** command). The list survives a restart, and closed tabs are never sent.
+- Secret files (`.env*`, keys, credentials, `*.tfvars`, …) never get completions and are never sent as context
+- Debug metrics line adds `recent_chars`, `prompt_eval` and `prompt_ms`; `npm run bench` runs each model with and without recent tabs
+
 ## 0.5.0
 
 - README (setup, recommended models, privacy, troubleshooting) and this changelog

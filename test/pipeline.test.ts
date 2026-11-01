@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { endpointProblem, readSettings } from '../src/config';
-import { buildContext, isSingleLine } from '../src/context';
+import { buildContext, isSecretFile, isSingleLine } from '../src/context';
 import { cleanCompletion } from '../src/filter';
-import { buildRequest, fileHeader, findTemplate } from '../src/prompt';
+import { buildRequest, fileHeader, findTemplate, recentBlock } from '../src/prompt';
 
 describe('buildContext', () => {
   it('returns everything when within budget', () => {
@@ -33,6 +33,14 @@ describe('buildContext', () => {
   it('skips the import block when the whole file fits', () => {
     const text = "import a from 'a';\nfoo(";
     expect(buildContext(text, text.length, 1000).prefix).toBe(text);
+  });
+
+  it('recognizes common secret files and leaves source files alone', () => {
+    for (const f of ['.env', 'C:\\w\\.env.local', '/w/.envrc', '/h/.npmrc', '/h/.ssh/id_ed25519', '/h/.aws/credentials',
+      'gcp/credentials.json', 'secrets.yaml', 'tls/server.KEY', 'cert.pem', 'prod.tfvars', 'terraform.tfstate.backup'])
+      expect(isSecretFile(f), f).toBe(true);
+    for (const f of ['/w/src/env.ts', '/w/environment.ts', '/h/.ssh/id_ed25519.pub', '/w/secrets.ts', '/w/keys.ts', '/w/monkey.py'])
+      expect(isSecretFile(f), f).toBe(false);
   });
 
   it('detects single-line mode from code after the cursor', () => {
@@ -104,6 +112,9 @@ describe('readSettings', () => {
     expect(s.maxTokens).toBe(128);
     expect(s.disabledLanguages).toEqual(['go']);
     expect(s.enabled).toBe(true);
+    expect(s.recentTabs).toBe(true);
+    expect(s.recentTabsCount).toBe(3);
+    expect(readSettings(src({ recentTabs: false, recentTabsCount: 50 }))).toMatchObject({ recentTabs: false, recentTabsCount: 10 });
   });
 });
 
@@ -140,6 +151,24 @@ describe('buildRequest', () => {
 
   it('omits header for languages without line comments', () => {
     expect(fileHeader({ path: 'a.json', languageId: 'json' })).toBe('');
+  });
+
+  it('puts recent files before the current file header', () => {
+    const body = buildRequest({ prefix: 'x', suffix: '' }, file, { insert: true }, s, '// File: b.ts (typescript)\nb\n\n');
+    expect(body.prompt).toBe('// File: b.ts (typescript)\nb\n\n# File: src/a.py (python)\nx');
+  });
+});
+
+describe('recentBlock', () => {
+  const ts = (path: string, text: string) => ({ path, languageId: 'typescript', text });
+
+  it('splits the budget evenly and cuts each head at a line boundary', () => {
+    const block = recentBlock([ts('a.ts', 'aaaa\nbbbb\ncccc\n'), ts('b.ts', 'short')], 24);
+    expect(block).toBe('// File: a.ts (typescript)\naaaa\nbbbb\n\n// File: b.ts (typescript)\nshort\n\n');
+  });
+
+  it('skips files without a line-comment header and empty heads', () => {
+    expect(recentBlock([{ path: 'a.json', languageId: 'json', text: '{}' }, ts('b.ts', 'x'.repeat(50))], 10)).toBe('');
   });
 });
 
