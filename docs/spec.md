@@ -41,7 +41,7 @@ References: [VS Code API](https://code.visualstudio.com/api/references/vscode-ap
 
 ### Non-Goals (v1)
 
-Chat, agents or code execution, automatic edits, cloud providers, accounts or billing, hosted backends, automatic model downloads (`/api/pull` is never called), workspace indexing or embeddings, multi-file context, telemetry of any kind.
+Chat, agents or code execution, automatic edits, cloud providers, accounts or billing, hosted backends, automatic model downloads (`/api/pull` is never called), workspace indexing or embeddings, context from files that aren't open (Phase 6 adds only outlines of recently used open tabs), telemetry of any kind.
 
 ## 3. Requirements
 
@@ -50,15 +50,15 @@ Chat, agents or code execution, automatic edits, cloud providers, accounts or bi
 | ID | Requirement |
 |---|---|
 | F1 | Register an `InlineCompletionItemProvider` for documents with scheme `file`, `untitled` or `vscode-notebook-cell`. |
-| F2 | Build the prompt from the prefix and suffix around the cursor, plus the language id and the workspace-relative path. |
+| F2 | Build the prompt from the prefix and suffix around the cursor, plus the language id and the workspace-relative path. With `recentTabs` on, also outlines of recently used open tabs (§10). |
 | F3 | Use Ollama's native FIM (`suffix` field) when the model reports the `insert` capability. Otherwise use a built-in raw FIM template if one matches. Otherwise use prefix-only continuation. |
 | F4 | Post-process the output: strip Markdown fences, trim prefix and suffix overlap, cap line count, and drop empty or whitespace-only results. |
 | F5 | Discover models with `GET /api/tags`. Never hardcode the installed-model list. |
 | F6 | Quick pick for model selection, persisted to user settings, effective immediately. |
 | F7 | Status bar item shows the enabled state, the model, and offline or error state. Clicking it opens the model picker. |
-| F8 | Commands: Enable, Disable, Select Model, Refresh Models, Test Connection, Open Settings. |
+| F8 | Commands: Enable, Disable, Select Model, Refresh Models, Test Connection, Toggle Recent Tabs, Open Settings. |
 | F9 | Respect `CancellationToken`. Abort the HTTP request when the request is superseded, times out, the model switches, or the extension deactivates. |
-| F10 | Skip completion for languages in `disabledLanguages` and when IntelliSense has a selected item (`context.selectedCompletionInfo`). |
+| F10 | Skip completion for languages in `disabledLanguages`, in secret files (§14), and when IntelliSense has a selected item (`context.selectedCompletionInfo`). |
 
 ### Non-functional
 
@@ -284,7 +284,10 @@ Acceptance and dismissal use VS Code's built-in keybindings: Tab (`editor.action
 
 ### Context
 
-- Source: the current document only. No other files and no workspace scan.
+- Source: the current document. With `recentTabs` on (default, Phase 6), also recently used open tabs. No workspace scan, and no files that aren't open.
+- Recent tabs: the provider keeps a most-recently-active list of `file` URIs from `onDidChangeActiveTextEditor`. `extension.ts` saves it in `workspaceState` and restores it at activation, so it survives a restart. Per request, the provider takes the `recentTabsCount` (default 3) most recent files that are still in an open tab (`window.tabGroups`; a document VS Code still holds after its tab closed doesn't count), sit inside a workspace folder, aren't the current file, aren't in `disabledLanguages` and aren't secret files (§14). A restored tab that isn't loaded yet is opened with `openTextDocument` (async read, no editor shown). The secret check runs before opening.
+- What each tab contributes: its **outline**, the line of every top-level symbol and of each member of a class, interface, struct, enum, module or namespace, from `vscode.executeDocumentSymbolProvider`. A function's children are locals and are left out, and so are imports. Only the first line of a multi-line signature is kept. The outline is cached per document version and computed in the background. Until it arrives (the first request after a tab becomes recent, measured 277 ms for a cold TypeScript server), or when a language has no symbol provider, the file head is used instead. Each part is cut at a line boundary under its own `fileHeader`. The total budget is `maxContextChars / 4` (1500 by default), split evenly and added on top of the current file's budget. Languages without a line comment are skipped. The block goes first in the prompt, with the most recent tab last, nearest the cursor.
+- Why outlines and not the best-matching snippet: an outline holds the names a completion needs most densely, and it doesn't change while you type in another file. The start of the prompt stays identical between requests, so Ollama's prompt cache reuses it. A similarity-picked snippet would change on most keystrokes and defeat the cache.
 - Budget: `maxContextChars` (default 6000 ≈ 1.5k tokens). The prefix gets up to 75%, the suffix the rest. Unused suffix budget goes back to the prefix.
 - Cut at line boundaries: the prefix starts at a line start and the suffix ends at a line end.
 - Header: a one-line comment in the language's line-comment style, falling back to `//`: `<comment> File: <workspace-relative path> (<languageId>)`. It is prepended to the prefix. A relative path keeps the absolute path (username, folder layout) out of the prompt.
@@ -322,7 +325,7 @@ Targets **[Assumption]**, to be validated with the benchmark below:
 
 Inline completions only show once fully generated, so "first usable suggestion" and "complete suggestion" are the same moment. Non-streaming (`stream: false`) is used. Streaming would only help if we stopped early at the line cap. That is a Phase 4 option if `eval_duration` shows wasted tokens.
 
-**Measurement:** with the output channel at Debug level (`Developer: Set Log Level…`), the output channel logs one line per request: `model, prompt_chars, total_ms, load_ms, eval_count, tok_s, done, outcome` (`shown`/`empty`/`stale`). `npm run bench -- <model> [<model>…]` (`scripts/bench.ts`, bundled by esbuild) replays 20 prompts against a running Ollama and prints p50/p95, tokens/s and the empty count. The prompts come from this repo's `src/` files, with the cursor at the end of lines 30%, 60% and 90% through each file. Optional; it never runs in CI.
+**Measurement:** with the output channel at Debug level (`Developer: Set Log Level…`), the output channel logs one line per request: `model, prompt_chars, recent_chars, total_ms, load_ms, prompt_eval, prompt_ms, eval_count, tok_s, done, outcome` (`shown`/`empty`/`stale`). `npm run bench -- <model> [<model>…]` (`scripts/bench.ts`, bundled by esbuild) replays 20 prompts against a running Ollama and prints p50/p95, tokens/s, the average prompt-eval tokens and time, and the empty count. Each model runs twice, without and with recent tabs (the heads of the first three other `src/` files). The prompts come from this repo's `src/` files, with the cursor at the end of lines 30%, 60% and 90% through each file. Optional; it never runs in CI.
 
 **Measured (2026-11-01, warm, `bench`):**
 
@@ -332,6 +335,16 @@ Inline completions only show once fully generated, so "first usable suggestion" 
 | `qwen2.5-coder:1.5b` | native FIM | 115 ms | 682 ms | 209.2 | 8/20 |
 
 An earlier 7b-only run measured p50 772 ms and p95 3809 ms, so single runs vary noticeably. The 7b meets the p50 target and misses the p95 target. The 1.5b meets both, but gives up quality: four times as many empty completions. Every fixture is a different file, so Ollama's prompt cache never hits, while real typing reuses most of the previous prompt. Treat these as pessimistic. Re-measure with a second model and in real use (debug log) before tuning `maxTokens` or adding streaming.
+
+**Recent tabs (2026-11-02, warm, `bench`):**
+
+| Model | Recent tabs | p50 | p95 | Prompt eval (avg) | Empty |
+|---|---|---|---|---|---|
+| `qwen2.5-coder:7b` (run 1) | off / on | 761 / 858 ms | 2170 / 2323 ms | 924 / 1291 tok, 257 / 274 ms | 3 / 3 |
+| `qwen2.5-coder:7b` (run 2) | off / on | 418 / 685 ms | 1901 / 2123 ms | 924 / 1291 tok, 46 / 97 ms | 3 / 3 |
+| `qwen2.5-coder:1.5b` | off / on | 185 / 191 ms | 745 / 786 ms | 924 / 1291 tok, 74 / 78 ms | 7 / 9 |
+
+Reading the extra ~370 prompt tokens costs 4–51 ms. The p50 and p95 move more than that, so most of the difference is run-to-run noise or different output, not prompt reading. These neighbor files are unrelated to the fixture, so the empty counts say nothing about quality yet. Judge that in real use.
 
 **Trade-offs:** 1.5B models are fast enough for CPU but weaker at multi-line. 7B models are a good GPU default. 14B+ usually exceeds the latency budget for typing-speed completion. Recommend `qwen2.5-coder:1.5b` (CPU) or `qwen2.5-coder:7b` (GPU) in the README.
 
@@ -367,6 +380,8 @@ All settings live under `localAutocomplete.*` in `package.json` `contributes.con
 | `numCtx` | integer | `4096` | 512–131072 | `window` | `options.num_ctx` (model context window). |
 | `keepAlive` | string | `"30m"` | Ollama duration string (`"30m"`, `"1h"`) or `"-1"` (forever) | `window` | `keep_alive` sent with each request. |
 | `disabledLanguages` | string[] | `["plaintext", "markdown", "scminput"]` | Language ids | `window` | No completions in these languages. |
+| `recentTabs` | boolean | `true` | — | `window` | Also send outlines of recently used open tabs (§10). Toggled by the Toggle Recent Tabs command. |
+| `recentTabsCount` | integer | `3` | 1–10 | `window` | How many recent tabs to include. |
 
 Fixed internally, not settings: `top_p: 0.9`, the 15-line cap, the 75/25 prefix split, and the 10 s offline backoff.
 
@@ -381,7 +396,9 @@ VS Code resolves Default < User < Workspace < Workspace Folder **[Confirmed]**. 
 - **Non-local endpoint warning:** a host that is not `localhost`, `127.0.0.0/8` or `::1` gets one warning per session per endpoint. The warning reads: "Code will be sent to <host>. Only use endpoints you control." It offers **Keep** and **Reset to localhost** buttons. If the scheme is `http:` and the host is non-local, the warning also says traffic is unencrypted.
 - **Logging:** a `LogOutputChannel` (`window.createOutputChannel(name, { log: true })`) logs metadata only. Prompts, completions, file contents and absolute paths are never logged. Error messages from Ollama are logged, truncated to 200 chars, because they may echo request content.
 - **Prompt content:** the prompt carries the workspace-relative path, never the absolute path. Untitled documents send `Untitled-1`.
-- **Exclusions:** `disabledLanguages` covers prose. Users with secret files (e.g. `.env`) should add their language id (`dotenv`, `properties`). The README documents this. A glob-based exclusion is an Open Question.
+- **Secret files:** a built-in, non-configurable file-name pattern (`isSecretFile` in `context.ts`) covers `.env` and `.env.*`, `.envrc`, `.npmrc`, `.pypirc`, `.netrc`, `.pgpass`, `.htpasswd`, `.git-credentials`, SSH private keys (`id_rsa`, `id_ed25519`, …, not `.pub`), `credentials` and `credentials.*` data files, `secret(s).{json,yaml,toml,env,txt}`, `local.settings.json`, and `*.pem/.key/.p12/.pfx/.jks/.keystore/.tfvars/.tfstate`. Such files get no completions and are never sent as recent-tab context, even to a local endpoint. Source files named like `secrets.ts` are not matched. It has no setting, so a workspace cannot weaken it.
+- **Exclusions:** `disabledLanguages` covers prose and anything else the pattern misses. User-defined glob exclusions are an Open Question.
+- **Recent tabs:** only files open in a tab inside a workspace folder with scheme `file` are sent, never files outside the workspace (such as `~/.ssh/config`) and never a tab you closed. Their outlines or heads go to the same single endpoint, so a non-local endpoint now receives more of your code. The endpoint warning covers this. The recent list (absolute file URIs) is stored in VS Code's local `workspaceState`. It is never logged and never sent.
 
 ## 15. Error Handling
 
@@ -413,7 +430,7 @@ A successful request resets the status bar to normal. State transitions are logg
 | Integration (`test/integration/`, `npm run test:integration`) | `@vscode/test-electron` (downloads VS Code into `.vscode-test/` once), plain `node:assert` | Activation, commands registered, ghost text accepted via `editor.action.inlineSuggest.commit` against a fake Ollama (Node `http`, random port) serving `/api/tags`, `/api/show`, `/api/generate`; the generate body carries the suffix and no absolute path | no (fake server) |
 | Manual / optional | `npm run bench`, checklist below | Real models: `qwen2.5-coder:1.5b`, `qwen2.5-coder:7b`, `deepseek-coder:6.7b`, `codegemma:2b`, one non-code model (prefix-only path) | yes |
 
-`models.ts` and `provider.ts` are tested with the real classes. `vitest.config.ts` aliases `vscode` to `test/vscode.ts`, a stub with only the members those modules touch (`Range`, `InlineCompletionItem`, `workspace.getConfiguration`, `window.showWarningMessage`). Extend the stub only when a test needs it. Don't mock the whole API.
+`models.ts` and `provider.ts` are tested with the real classes. `vitest.config.ts` aliases `vscode` to `test/vscode.ts`, a stub with only the members those modules touch (`Range`, `InlineCompletionItem`, `SymbolKind`, `TabInputText`, `Uri.parse`, `workspace.getConfiguration`/`textDocuments`/`openTextDocument`/`getWorkspaceFolder`/`asRelativePath`, `window.showWarningMessage`/`tabGroups`, `commands.executeCommand`). Tests replace `textDocuments`, `tabGroups`, `openTextDocument` and `executeCommand` per case and reset them in `afterEach`. Extend the stub only when a test needs it. Don't mock the whole API.
 
 `@vscode/test-cli` (and its Mocha) was left out: one suite with a `run()` export needs no test framework. The launcher deletes `ELECTRON_RUN_AS_NODE`, which terminals inside VS Code set and which makes `Code.exe` reject the launch arguments.
 
@@ -482,6 +499,7 @@ Versioning: SemVer in `package.json`. Bump the minor version per phase and the p
 | **3. Completion quality** | Raw FIM template table, single/multi-line mode, full filter rules, import-block context, mid-word skip, `selectedCompletionInfo` skip **[Done in 0.3.0]** | 1 | Mid-line completions don't duplicate the suffix (manual checklist). Filter unit tests cover every rule, including untouched valid code. |
 | **4. Reliability and performance** | Timeout + cold-load allowance, offline backoff, error mapping per §15, debug metrics line, `scripts/bench.ts` **[Done in 0.4.0]** | 1–2 | Concurrency tests pass. With Ollama stopped, typing in a 2k-line file shows no lag and no notifications. Bench p50 is recorded for 2+ models. HTTP-abort-stops-inference is validated (§12). |
 | **5. Testing and packaging** | Mocked-API tests, integration tests with a fake server, README (setup, recommended models, privacy, troubleshooting), CHANGELOG, `.vsix` **[Done in 0.5.0]** | 1–4 | `npm test` and the integration tests pass with no Ollama installed. The `.vsix` installs and works in a clean VS Code profile. The manual checklist passes on 3+ models. |
+| **6. Recent tabs context** | `recentTabs` / `recentTabsCount` settings, most-recently-active tracking persisted in `workspaceState`, open-tab check, symbol outlines with head fallback, `recentBlock` in `prompt.ts`, built-in secret-file exclusion, Toggle Recent Tabs command, `recent_chars`/`prompt_eval`/`prompt_ms` in the debug line, bench variant **[Done in 0.6.0]** | 1–5 | Unit tests cover the secret pattern, budget split, prompt order, closed and restored tabs, and the head-to-outline switch. The integration test sees a real TypeScript outline in the prompt and never the `.env`. Bench p50 is recorded with and without recent tabs for 2 models. Manual: with a types file open in a recent tab, a completion uses a name that exists only in that file. Turning `recentTabs` off drops `recent_chars` to 0 in the debug log. |
 
 ## 20. Acceptance Criteria (critical workflows)
 
@@ -508,8 +526,9 @@ Versioning: SemVer in `package.json`. Bump the minor version per phase and the p
 ## 22. Open Questions
 
 1. Should a `modelOverrides` setting (per-model template, stop tokens, `num_ctx`) be added once real models show gaps in the built-in profiles?
-2. Glob-based file exclusion (e.g. `**/.env*`) instead of, or in addition to, language ids?
+2. User-defined glob exclusions on top of the built-in secret-file pattern (Phase 6)?
 3. Per-workspace model selection. It is currently `machine`-scoped for simplicity and security.
 4. Should completions combine with an open IntelliSense selection (`selectedCompletionInfo`) instead of skipping?
 5. Is streaming with early termination worth it, based on Phase 4 `eval_count` data?
 6. Is the leading-imports context heuristic (Phase 3) measurably better than the plain prefix window?
+7. Do recent-tab outlines improve completions in real use? Would Qwen's native repo format (`<|repo_name|>`, `<|file_sep|>`) make the model use them better than `// File:` comments?

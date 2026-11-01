@@ -45,6 +45,15 @@ export async function run(): Promise<void> {
     await cfg.update('model', 'fake:1b', global);
     await cfg.update('debounceMs', 0, global);
 
+    // Recent tabs: types.ts and .env are open in tabs before the file being edited.
+    const root = vscode.workspace.workspaceFolders![0].uri;
+    const types = await vscode.workspace.openTextDocument(vscode.Uri.joinPath(root, 'types.ts'));
+    await vscode.window.showTextDocument(types, { preview: false });
+    await vscode.window.showTextDocument(vscode.Uri.joinPath(root, '.env'), { preview: false });
+    const t0 = Date.now();
+    const symbols = await vscode.commands.executeCommand<unknown[]>('vscode.executeDocumentSymbolProvider', types.uri);
+    console.log(`document symbols: ${symbols?.length ?? 0} in ${Date.now() - t0} ms`);
+
     const doc = await vscode.workspace.openTextDocument({
       language: 'typescript',
       content: 'function add(a: number, b: number) {\n  \n}\n',
@@ -63,6 +72,18 @@ export async function run(): Promise<void> {
     assert.equal(generates[0].model, 'fake:1b');
     assert.equal(generates[0].suffix, '\n}\n', 'native FIM: the suffix is sent');
     assert.ok(!String(generates[0].prompt).includes(':\\'), 'no absolute path in the prompt');
+
+    // The outline replaces the head once symbols are cached; force fresh requests until it shows up.
+    const outline = '// File: types.ts (typescript)\nexport interface User {\n  id: string;\nexport function loadUser(id: string): User {\n';
+    for (let i = 0; i < 50 && !generates.some((g) => String(g.prompt).startsWith(outline)); i++) {
+      await vscode.commands.executeCommand('editor.action.inlineSuggest.hide');
+      await vscode.commands.executeCommand('editor.action.inlineSuggest.trigger');
+      await sleep(100);
+    }
+    const last = String(generates.at(-1)!.prompt);
+    assert.ok(last.startsWith(outline), `recent tab sent as its outline, got: ${last.slice(0, 200)}`);
+    assert.ok(!last.includes('readFileSync(id'), 'function bodies are not in the outline');
+    assert.ok(generates.every((g) => !String(g.prompt).includes('hunter2')), '.env is never sent');
   } finally {
     server.close();
   }

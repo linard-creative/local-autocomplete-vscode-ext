@@ -10,6 +10,8 @@ export interface Settings {
   numCtx: number;
   keepAlive: string;
   disabledLanguages: string[];
+  recentTabs: boolean;
+  recentTabsCount: number;
 }
 
 // Structural subset of vscode.WorkspaceConfiguration, so this module stays testable without VS Code.
@@ -52,5 +54,7 @@ export function readSettings(c: ConfigSource): Settings {
     numCtx: Math.round(num(c.get('numCtx'), 512, 131072, 4096)),
     keepAlive: str(c.get('keepAlive'), '30m') || '30m',
     disabledLanguages: Array.isArray(langs) ? langs.filter((l): l is string => typeof l === 'string') : [],
+    recentTabs: c.get<unknown>('recentTabs') !== false,
+    recentTabsCount: Math.round(num(c.get('recentTabsCount'), 1, 10, 3)),
   };
 }

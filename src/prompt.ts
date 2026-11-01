@@ -136,13 +136,37 @@ export function fileHeader({ path, languageId }: FileInfo): string {
 	return `${c} File: ${path} (${languageId})\n`;
 }
 
+export interface RecentFile extends FileInfo {
+	text: string;
+}
+
+/**
+ * Head of each recent file, `budget` split evenly, each under its own file header.
+ * Heads don't change while you type elsewhere, so Ollama's prompt cache reuses this block.
+ */
+export function recentBlock(files: RecentFile[], budget: number): string {
+	const usable = files.filter((f) => fileHeader(f));
+	const each = Math.floor(budget / Math.max(1, usable.length));
+	return usable
+		.map((f) => {
+			const head =
+				f.text.length <= each
+					? f.text
+					: f.text.slice(0, f.text.lastIndexOf("\n", each) + 1);
+			return head.trim() ? `${fileHeader(f)}${head.trimEnd()}\n\n` : "";
+		})
+		.join("");
+}
+
 export function buildRequest(
 	ctx: CompletionContext,
 	file: FileInfo,
 	profile: ModelProfile,
 	s: Settings,
+	recent = "",
 ): GenerateRequest {
-	const prompt = fileHeader(file) + ctx.prefix;
+	// Recent files first: a stable start of the prompt is what Ollama's prompt cache can reuse.
+	const prompt = recent + fileHeader(file) + ctx.prefix;
 	const lineStop = isSingleLine(ctx) ? ["\n"] : [];
 	const options = {
 		num_predict: s.maxTokens,
