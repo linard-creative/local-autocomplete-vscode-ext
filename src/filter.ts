@@ -27,12 +27,43 @@ export function cleanCompletion(raw: string, ctx: CompletionContext, truncated =
     }
   }
 
+  if (!isSingleLine(ctx)) text = cutDuplicateCloser(text, ctx.suffix);
+
   let lines = text.split('\n');
   if (PROSE.test(lines[0])) lines = lines.slice(1);
   if (truncated && lines.length > 1) lines.pop();
   text = lines.slice(0, isSingleLine(ctx) ? 1 : MAX_LINES).join('\n').trimEnd();
 
   return text.trim() ? text : undefined;
+}
+
+/**
+ * Cuts before the first closer the completion did not open itself, when the code after the cursor starts with that same closer:
+ * the model finished the block and added the `}` that is already there.
+ * shortcut: no comment or regex awareness and the scan assumes the completion starts outside a string; upgrade if logs show wrong cuts.
+ */
+function cutDuplicateCloser(text: string, suffix: string): string {
+  const next = suffix.trimStart()[0];
+  if (!next || !')]}'.includes(next)) return text;
+  let depth = 0;
+  let quote = '';
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quote) {
+      if (c === '\\') i++;
+      else if (c === quote || (c === '\n' && quote !== '`')) quote = '';
+    } else if ('"\'`'.includes(c)) quote = c;
+    else if ('([{'.includes(c)) depth++;
+    else if (')]}'.includes(c)) {
+      if (depth) depth--;
+      else if (c === next) {
+        const lineStart = text.lastIndexOf('\n', i - 1) + 1;
+        // A closer alone on its line goes with its line; one after code is cut where it stands.
+        return text.slice(0, /\S/.test(text.slice(lineStart, i)) ? i : lineStart).trimEnd();
+      }
+    }
+  }
+  return text;
 }
 
 const balanced = (line: string): boolean => {

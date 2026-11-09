@@ -86,8 +86,27 @@ describe('cleanCompletion', () => {
     expect(cleanCompletion('return x;\n}\nexport default f;', { prefix: '', suffix })).toBe('return x;\n}');
   });
 
-  it('keeps short overlaps (under 3 chars) to avoid cutting valid code', () => {
-    expect(cleanCompletion('a, b);\n}', { prefix: 'f(', suffix: '\n}' })).toBe('a, b);\n}');
+  it('keeps a needed closer but cuts the one the suffix already has', () => {
+    expect(cleanCompletion('a, b);\n}', { prefix: 'f(', suffix: '\n}' })).toBe('a, b);');
+  });
+
+  it('cuts a closing brace the suffix already supplies', () => {
+    const ctx = { prefix: 'function f() {\n  ', suffix: '\n}\n' };
+    expect(cleanCompletion('return 1;\n}', ctx)).toBe('return 1;');
+    expect(cleanCompletion('return 1; }', ctx)).toBe('return 1;');
+  });
+
+  it('keeps blocks the completion opens and closes itself', () => {
+    const ctx = { prefix: 'function f() {\n  ', suffix: '\n}' };
+    expect(cleanCompletion('if (x) {\n    y();\n  }\n}', ctx)).toBe('if (x) {\n    y();\n  }');
+  });
+
+  it('ignores closers inside strings', () => {
+    expect(cleanCompletion('log("}");', { prefix: '{\n  ', suffix: '\n}' })).toBe('log("}");');
+  });
+
+  it('leaves closers alone when the suffix does not start with one', () => {
+    expect(cleanCompletion('x();\n}', { prefix: '{\n  ', suffix: '\nfoo();' })).toBe('x();\n}');
   });
 
   it('drops a leading prose line only', () => {
