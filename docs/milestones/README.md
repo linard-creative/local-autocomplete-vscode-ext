@@ -11,6 +11,7 @@ One file per finished roadmap phase (spec §19). Add a file when a phase ships a
 | 5. Testing and packaging | Done | 0.5.0 | [phase-5.md](phase-5.md) |
 | 6. Recent tabs context | Done | 0.6.0 | [phase-6.md](phase-6.md) |
 | 7. Auto-closed suffix | Done (manual check pending) | 0.7.0 | [phase-7.md](phase-7.md) |
+| 8. Balanced completions | Done (manual check pending) | 0.8.0 | [phase-8.md](phase-8.md) |
 
 ## Phases
 
@@ -41,5 +42,9 @@ Mocked-API tests, integration tests with a fake server, README (setup, recommend
 ### 7. Auto-closed suffix — done
 
 When the completion already contains the rest of the line (e.g. auto-closed `")` or `)`) and only replacing it balances the line, replace it instead of inserting before it. Fixes `console.log("userDetailsData", userDetailsData)")` and `if(!userDetailsData) return null;)`. Plus the 2026-11-10 audit fixes: CRLF context, line-50 imports, missing-model recovery, the `404 page not found` mapping, and the outline race.
+
+### 8. Balanced completions — done
+
+Two more filter rules. Multi-line: cut a closing bracket the code after the cursor already supplies (no more `}\n}`). Single-line: show nothing when inserting would break a balanced line. Plan: [2026-11-10-balanced-completions.md](../superpowers/plans/2026-11-10-balanced-completions.md).
 
 Each phase file contains: what shipped, acceptance status (spec §19), and any decisions or deviations from the spec.

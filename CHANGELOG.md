@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.0
+
+- A multi-line suggestion no longer repeats a closing bracket that already follows the cursor (no more `}` twice at the end of a block)
+- Single-line suggestions that would break the brackets or quotes of a balanced line (e.g. `a, b))` or `"hello` inside `foo()`) are no longer shown
+
 ## 0.7.0
 
 - Suggestions no longer leave auto-closed characters behind: typing `console.log("` or `if(` and accepting gives `console.log("a", a)` and `if(!a) return null;` instead of an extra `")` or `)` at the end of the line
