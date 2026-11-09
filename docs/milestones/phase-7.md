@@ -15,7 +15,7 @@
 
 - [x] Unit tests: both screenshot cases and Python `print('|')` replace the rest of the line, while `a(b)` before `)`, `userDetailsData` before `")`, multi-line output and an empty rest stay plain inserts. Also tests for CRLF trimming, the line-50 import, the `404 page not found` mapping, and missing-model recovery: 51/51 (3 files).
 - [x] Integration test (real VS Code 1.144, fake Ollama): accepting `x", x)` inside `console.log("|")` gives `console.log("x", x)`. VS Code shows and applies a suggestion that replaces existing characters.
-- [ ] Manual: the screenshot case in TypeScript and Python shows the right ghost text with a real model, and Tab gives a line with no doubled closers. Pending user confirmation. The TypeScript case is covered by the integration test above.
+- [x] Manual: the screenshot case in TypeScript and Python shows the right ghost text with a real model, and Tab gives a line with no doubled closers. Confirmed by the user on 0.8.0 (2026-11-10): "looks fine for me"
 
 ## Decisions / deviations (recorded in spec §8, §10, §19)
 

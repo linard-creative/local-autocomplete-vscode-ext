@@ -12,7 +12,7 @@ Plan: [2026-11-10-balanced-completions.md](../superpowers/plans/2026-11-10-balan
 
 - [x] Unit tests: closers inside strings, blocks the completion closes itself, a needed `)` kept before a suffix `}`, escaped quotes, already-unbalanced lines, empty rest and multi-line text are left alone: 60/60 (3 files).
 - [x] Integration test (real VS Code, fake Ollama) still passes, including the Phase 7 replace case.
-- [ ] Manual: in TypeScript, a function body typed before an auto-closed `}` has no doubled `}`. In `foo(|)`, no ghost text leaves an extra `)` or an open quote. Pending user confirmation. Watch the `outcome=unbalanced` count in the debug log.
+- [x] Manual: in TypeScript, a function body typed before an auto-closed `}` has no doubled `}`. In `foo(|)`, no ghost text leaves an extra `)` or an open quote. Confirmed by the user (2026-11-10): "looks fine for me"
 
 ## Decisions / deviations (recorded in spec §10)
 

@@ -213,4 +213,4 @@ git add docs/spec.md docs/milestones/README.md docs/milestones/phase-8.md CHANGE
 git commit -m "Phase 8: balanced completions (0.8.0)"
 ```
 
-- [ ] **Step 7: Manual check (user).** Run the §19 manual items with `Local Autocomplete` debug logging on, and watch for `outcome=unbalanced` counts. Once the user confirms, check the manual box in `phase-8.md` and set the README row to Done. The Phase 7 manual check (Python `print('|')` with a real model) can be done in the same pass.
+- [x] **Step 7: Manual check (user).** Run the §19 manual items with `Local Autocomplete` debug logging on, and watch for `outcome=unbalanced` counts. Once the user confirms, check the manual box in `phase-8.md` and set the README row to Done. The Phase 7 manual check (Python `print('|')` with a real model) can be done in the same pass.

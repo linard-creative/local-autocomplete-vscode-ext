@@ -10,8 +10,8 @@ One file per finished roadmap phase (spec §19). Add a file when a phase ships a
 | 4. Reliability and performance | Done | 0.4.0 | [phase-4.md](phase-4.md) |
 | 5. Testing and packaging | Done | 0.5.0 | [phase-5.md](phase-5.md) |
 | 6. Recent tabs context | Done | 0.6.0 | [phase-6.md](phase-6.md) |
-| 7. Auto-closed suffix | Done (manual check pending) | 0.7.0 | [phase-7.md](phase-7.md) |
-| 8. Balanced completions | Done (manual check pending) | 0.8.0 | [phase-8.md](phase-8.md) |
+| 7. Auto-closed suffix | Done | 0.7.0 | [phase-7.md](phase-7.md) |
+| 8. Balanced completions | Done | 0.8.0 | [phase-8.md](phase-8.md) |
 
 ## Phases
 
