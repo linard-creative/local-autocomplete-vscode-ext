@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { endpointProblem, readSettings } from '../src/config';
 import { buildContext, isSecretFile, isSingleLine } from '../src/context';
-import { cleanCompletion } from '../src/filter';
+import { cleanCompletion, fitLine, replacesRest } from '../src/filter';
 import { buildRequest, fileHeader, findTemplate, recentBlock } from '../src/prompt';
 
 describe('buildContext', () => {
@@ -28,6 +28,19 @@ describe('buildContext', () => {
     expect(prefix.startsWith(imports + 'const x = 1;\n')).toBe(true);
     expect(prefix.endsWith('foo(')).toBe(true);
     expect(prefix.length).toBeLessThanOrEqual(1000);
+  });
+
+  it('keeps an import on line 50 of a long file', () => {
+    const head = 'const x = 1;\n'.repeat(49) + "import a from 'a';\n";
+    const text = head + 'y();\n'.repeat(300) + 'foo(';
+    expect(buildContext(text, text.length, 4000).prefix.startsWith(head)).toBe(true);
+  });
+
+  it('sends LF line endings for CRLF files, so suffix overlap is still trimmed', () => {
+    const text = 'function f() {\r\n  if (a) {\r\n    |\r\n  }\r\n}\r\n';
+    const ctx = buildContext(text.replace('|', ''), text.indexOf('|'), 1000);
+    expect(ctx).toEqual({ prefix: 'function f() {\n  if (a) {\n    ', suffix: '\n  }\n}\n' });
+    expect(cleanCompletion('return x;\n  }\n}', ctx)).toBe('return x;');
   });
 
   it('skips the import block when the whole file fits', () => {
@@ -73,8 +86,27 @@ describe('cleanCompletion', () => {
     expect(cleanCompletion('return x;\n}\nexport default f;', { prefix: '', suffix })).toBe('return x;\n}');
   });
 
-  it('keeps short overlaps (under 3 chars) to avoid cutting valid code', () => {
-    expect(cleanCompletion('a, b);\n}', { prefix: 'f(', suffix: '\n}' })).toBe('a, b);\n}');
+  it('keeps a needed closer but cuts the one the suffix already has', () => {
+    expect(cleanCompletion('a, b);\n}', { prefix: 'f(', suffix: '\n}' })).toBe('a, b);');
+  });
+
+  it('cuts a closing brace the suffix already supplies', () => {
+    const ctx = { prefix: 'function f() {\n  ', suffix: '\n}\n' };
+    expect(cleanCompletion('return 1;\n}', ctx)).toBe('return 1;');
+    expect(cleanCompletion('return 1; }', ctx)).toBe('return 1;');
+  });
+
+  it('keeps blocks the completion opens and closes itself', () => {
+    const ctx = { prefix: 'function f() {\n  ', suffix: '\n}' };
+    expect(cleanCompletion('if (x) {\n    y();\n  }\n}', ctx)).toBe('if (x) {\n    y();\n  }');
+  });
+
+  it('ignores closers inside strings', () => {
+    expect(cleanCompletion('log("}");', { prefix: '{\n  ', suffix: '\n}' })).toBe('log("}");');
+  });
+
+  it('leaves closers alone when the suffix does not start with one', () => {
+    expect(cleanCompletion('x();\n}', { prefix: '{\n  ', suffix: '\nfoo();' })).toBe('x();\n}');
   });
 
   it('drops a leading prose line only', () => {
@@ -99,6 +131,48 @@ describe('cleanCompletion', () => {
 
   it('drops empty output', () => {
     expect(cleanCompletion('  \n\n', multi)).toBeUndefined();
+  });
+});
+
+describe('fitLine', () => {
+  it('replaces when replacesRest holds', () => {
+    expect(fitLine('console.log("', 'x", x)', '")')).toBe('replace');
+  });
+
+  it('drops a completion that unbalances a balanced line', () => {
+    expect(fitLine('foo(', 'a, b))', ')')).toBeUndefined();
+    expect(fitLine('log(', '"hello', ')')).toBeUndefined();
+    expect(fitLine('x = [', '1, 2}', ']')).toBeUndefined();
+  });
+
+  it('inserts balanced completions, escaped quotes included', () => {
+    expect(fitLine('foo(', 'a, b', ')')).toBe('insert');
+    expect(fitLine('x = foo(', '"a\\"b"', ')')).toBe('insert');
+  });
+
+  it('never drops on a line that was already unbalanced or has no rest', () => {
+    expect(fitLine('if (a && (b', ' || c', ') {')).toBe('insert');
+    expect(fitLine('const s = ', '"hello', '')).toBe('insert');
+    expect(fitLine('if (x) ', '{', '')).toBe('insert');
+  });
+
+  it('leaves multi-line text alone', () => {
+    expect(fitLine('foo(', 'a,\n  b', ')')).toBe('insert');
+  });
+});
+
+describe('replacesRest', () => {
+  it('replaces auto-closed characters the completion closes itself', () => {
+    expect(replacesRest('console.log("', 'userDetailsData", userDetailsData)', '")')).toBe(true);
+    expect(replacesRest('    if(', '!userDetailsData) return null;', ')')).toBe(true);
+    expect(replacesRest("print('", "hello')", "')")).toBe(true);
+  });
+
+  it('keeps a plain insert when the suffix is still needed', () => {
+    expect(replacesRest('foo(', 'a(b)', ')')).toBe(false);
+    expect(replacesRest('console.log("', 'userDetailsData', '")')).toBe(false);
+    expect(replacesRest('if(', 'a) {\n}', ')')).toBe(false);
+    expect(replacesRest('x = ', '1;', '')).toBe(false);
   });
 });
 

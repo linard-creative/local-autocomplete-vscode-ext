@@ -185,6 +185,23 @@ describe('provider concurrency', () => {
     );
   });
 
+  it('retries a missing model after the backoff and resumes once it is installed', async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(Response.json({ error: "model 'm:1b' not found" }, { status: 404 })));
+    const { models, provider } = setup();
+    await provider.provideInlineCompletionItems(doc, pos, ctx, tokenSource().token);
+    expect(models.missing).toBe('m:1b');
+    const calls = fetchMock.mock.calls.length;
+    await provider.provideInlineCompletionItems(doc, pos, ctx, tokenSource().token);
+    expect(fetchMock.mock.calls.length).toBe(calls); // backing off
+
+    models.offlineUntil = 0; // backoff over; the user ran `ollama pull`
+    fetchMock.mockImplementation((url: string) =>
+      Promise.resolve(Response.json(url.endsWith('/api/show') ? { capabilities: ['insert'] } : { response: 'x', done: true })),
+    );
+    expect((await provider.provideInlineCompletionItems(doc, pos, ctx, tokenSource().token))?.[0].insertText).toBe('x');
+    expect(models.missing).toBeUndefined();
+  });
+
   it('never completes in secret files', async () => {
     const { provider } = setup();
     expect(await provider.provideInlineCompletionItems(docAt('/w/.env.local'), pos, ctx, tokenSource().token)).toBeUndefined();

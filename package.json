@@ -2,7 +2,7 @@
   "name": "local-autocomplete",
   "displayName": "Local Autocomplete",
   "description": "Inline code completions from your local Ollama models. No cloud, no telemetry.",
-  "version": "0.6.0",
+  "version": "0.8.0",
   "publisher": "linard-creative",
   "license": "MIT",
   "repository": {

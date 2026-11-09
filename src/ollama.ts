@@ -60,7 +60,7 @@ async function request<T>(endpoint: string, path: string, body: unknown, signal?
     if (!res.ok) {
       // Truncated: error bodies may echo request content.
       const text = (await res.text().catch(() => '')).slice(0, 200);
-      const kind = res.status === 404 && /not found/i.test(text) ? 'model-not-found' : 'http';
+      const kind = res.status === 404 && /model.*not found/i.test(text) ? 'model-not-found' : 'http';
       throw new OllamaError(kind, `HTTP ${res.status}: ${text}`, res.status);
     }
     try {

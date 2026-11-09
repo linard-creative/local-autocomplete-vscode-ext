@@ -88,6 +88,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       if (['model', 'endpoint', 'enabled'].some((k) => e.affectsConfiguration(`localAutocomplete.${k}`))) {
         provider?.abortCurrent();
+        models.offlineUntil = 0; // a new model or endpoint gets tried right away
         void vscode.commands.executeCommand('editor.action.inlineSuggest.hide');
       }
       render();

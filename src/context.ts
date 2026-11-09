@@ -10,7 +10,7 @@ function importBlock(text: string, max: number): string {
   const lines = text.split('\n', 50);
   const last = lines.findLastIndex((l) => IMPORT.test(l));
   // The final split element may be the partial cursor line, so it never counts.
-  if (last === -1 || last === lines.length - 1) return '';
+  if (last === -1 || (lines.length < 50 && last === lines.length - 1)) return '';
   const head = lines.slice(0, last + 1).join('\n') + '\n';
   return head.length <= max ? head : '';
 }
@@ -43,7 +43,8 @@ export function buildContext(text: string, offset: number, budget: number): Comp
     if (nl !== -1) suffix = suffix.slice(0, nl);
   }
 
-  return { prefix: head + prefix, suffix };
+  // LF only: the filter compares the model's `\n` output against the suffix, and models see LF far more in training.
+  return { prefix: (head + prefix).replace(/\r\n/g, '\n'), suffix: suffix.replace(/\r\n/g, '\n') };
 }
 
 // Files that commonly hold secrets (spec §14): never completed in, never sent as recent-tab context.

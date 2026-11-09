@@ -2,7 +2,7 @@ import { defineConfig } from 'eslint/config';
 import tseslint from 'typescript-eslint';
 
 export default defineConfig(
-  { ignores: ['dist/', 'node_modules/', 'samples/', '.vscode-test/'] },
+  { ignores: ['dist/', 'node_modules/','.vscode-test/'] },
   tseslint.configs.recommended,
   {
     files: ['src/**/*.ts'],

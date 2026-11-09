@@ -62,6 +62,10 @@ export class ModelService {
   report(model: string, err?: OllamaError): void {
     const kind = err?.kind;
     if (!err) this.lastSuccess.set(model, Date.now());
+    if (!err && this.missing === model) {
+      this.missing = undefined;
+      this.onChange();
+    }
     if (kind === 'aborted') return;
     if (kind === 'timeout') return this.log.debug(err!.message);
     if (kind === 'invalid-response') return this.log.warn(err!.message);
@@ -80,6 +84,8 @@ export class ModelService {
   }
 
   private markMissing(model: string): void {
+    // Probe again after the backoff, so a later `ollama pull` brings completions back without a command.
+    this.offlineUntil = Date.now() + OFFLINE_BACKOFF_MS;
     if (this.missing === model) return;
     this.missing = model;
     this.log.warn(`Model "${model}" is not installed in Ollama`);
