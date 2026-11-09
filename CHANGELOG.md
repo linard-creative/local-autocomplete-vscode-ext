@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.0
+
+- Workspace context: suggestions can use code from files that aren't open. A background index of the workspace adds up to 2 relevant snippets per suggestion, the definition of a name used near the cursor first, then similar code, and nothing when nothing clearly matches (`workspaceContext`, **Toggle Workspace Context** command, progress in the status bar tooltip). Secret, ignored, excluded, binary, minified and large files are never read. The index stays in memory.
+- Debug metrics line adds `workspace_chars`, `workspace_ms` and `workspace_hits`. New `npm run bench:context` (index speed, memory, retrieval quality), a workspace variant in `npm run bench`, and performance budgets in `npm test`.
+
 ## 0.8.0
 
 - A multi-line suggestion no longer repeats a closing bracket that already follows the cursor (no more `}` twice at the end of a block)

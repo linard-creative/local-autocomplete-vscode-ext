@@ -12,6 +12,7 @@ export interface Settings {
   disabledLanguages: string[];
   recentTabs: boolean;
   recentTabsCount: number;
+  workspaceContext: boolean;
 }
 
 // Structural subset of vscode.WorkspaceConfiguration, so this module stays testable without VS Code.
@@ -56,5 +57,6 @@ export function readSettings(c: ConfigSource): Settings {
     disabledLanguages: Array.isArray(langs) ? langs.filter((l): l is string => typeof l === 'string') : [],
     recentTabs: c.get<unknown>('recentTabs') !== false,
     recentTabsCount: Math.round(num(c.get('recentTabsCount'), 1, 10, 3)),
+    workspaceContext: c.get<unknown>('workspaceContext') !== false,
   };
 }

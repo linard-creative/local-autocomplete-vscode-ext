@@ -208,6 +208,17 @@ describe('provider concurrency', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('is busy only while a request is in flight', async () => {
+    const { provider } = setup();
+    expect(provider.busy).toBe(false);
+    const p = provider.provideInlineCompletionItems(doc, pos, ctx, tokenSource().token);
+    await vi.waitFor(() => expect(generates).toHaveLength(1));
+    expect(provider.busy).toBe(true);
+    generates[0].respond('x');
+    await p;
+    expect(provider.busy).toBe(false);
+  });
+
   it('treats a model as cold until it has answered', async () => {
     const { models, provider } = setup();
     expect(models.isCold('m:1b')).toBe(true);
@@ -216,5 +227,46 @@ describe('provider concurrency', () => {
     generates[0].respond('x');
     await p;
     expect(models.isCold('m:1b')).toBe(false);
+  });
+});
+
+describe('workspace context', () => {
+  const snippet = { path: 'lib/invoice.ts', languageId: 'typescript', text: 'export function computeInvoiceTotal() {}' };
+  const fakeWorkspace = (excludes: ReadonlySet<string>[]) => ({
+    snippets: async (_prefix: string, _window: string, exclude: ReadonlySet<string>) => {
+      excludes.push(exclude);
+      return { files: [snippet], kinds: 'def' };
+    },
+  });
+
+  it('puts snippets after recent tabs and before the current file, excluding both', async () => {
+    const { provider } = setup();
+    const excludes: ReadonlySet<string>[] = [];
+    provider.workspace = fakeWorkspace(excludes);
+    const b = docAt('/w/b.ts', 'export const b = 1;\n');
+    workspace.textDocuments = [b, doc];
+    openTabs(b, doc);
+    provider.noteActive(b);
+    provider.noteActive(doc);
+    void provider.provideInlineCompletionItems(doc, pos, ctx, tokenSource().token);
+    await vi.waitFor(() => expect(generates).toHaveLength(1));
+    expect(generates[0].prompt).toBe(
+      '// File: b.ts (typescript)\nexport const b = 1;\n\n' +
+        '// File: lib/invoice.ts (typescript)\nexport function computeInvoiceTotal() {}\n\n' +
+        '// File: a.ts (typescript)\n' +
+        text,
+    );
+    expect(excludes).toEqual([new Set(['a.ts', 'b.ts'])]);
+  });
+
+  it('sends no snippets when workspaceContext is off', async () => {
+    const { provider } = setup();
+    const excludes: ReadonlySet<string>[] = [];
+    provider.workspace = fakeWorkspace(excludes);
+    config.workspaceContext = false;
+    void provider.provideInlineCompletionItems(doc, pos, ctx, tokenSource().token);
+    await vi.waitFor(() => expect(generates).toHaveLength(1));
+    expect(generates[0].prompt).toBe('// File: a.ts (typescript)\n' + text);
+    expect(excludes).toEqual([]);
   });
 });

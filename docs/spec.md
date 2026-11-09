@@ -41,7 +41,7 @@ References: [VS Code API](https://code.visualstudio.com/api/references/vscode-ap
 
 ### Non-Goals (v1)
 
-Chat, agents or code execution, automatic edits, cloud providers, accounts or billing, hosted backends, automatic model downloads (`/api/pull` is never called), workspace indexing or embeddings, context from files that aren't open (Phase 6 adds only outlines of recently used open tabs), telemetry of any kind.
+Chat, agents or code execution, automatic edits, cloud providers, accounts or billing, hosted backends, automatic model downloads (`/api/pull` is never called), fine-tuning, embeddings, a persisted (on-disk) index, telemetry of any kind. Phase 6 adds outlines of recently used open tabs. Phase 9 adds an in-memory lexical index of the workspace (§10).
 
 ## 3. Requirements
 
@@ -50,13 +50,13 @@ Chat, agents or code execution, automatic edits, cloud providers, accounts or bi
 | ID | Requirement |
 |---|---|
 | F1 | Register an `InlineCompletionItemProvider` for documents with scheme `file`, `untitled` or `vscode-notebook-cell`. |
-| F2 | Build the prompt from the prefix and suffix around the cursor, plus the language id and the workspace-relative path. With `recentTabs` on, also outlines of recently used open tabs (§10). |
+| F2 | Build the prompt from the prefix and suffix around the cursor, plus the language id and the workspace-relative path. With `recentTabs` on, also outlines of recently used open tabs. With `workspaceContext` on, also up to 2 relevant chunks from other workspace files (§10). |
 | F3 | Use Ollama's native FIM (`suffix` field) when the model reports the `insert` capability. Otherwise use a built-in raw FIM template if one matches. Otherwise use prefix-only continuation. |
 | F4 | Post-process the output: strip Markdown fences, trim prefix and suffix overlap, cap line count, and drop empty or whitespace-only results. |
 | F5 | Discover models with `GET /api/tags`. Never hardcode the installed-model list. |
 | F6 | Quick pick for model selection, persisted to user settings, effective immediately. |
 | F7 | Status bar item shows the enabled state, the model, and offline or error state. Clicking it opens the model picker. |
-| F8 | Commands: Enable, Disable, Select Model, Refresh Models, Test Connection, Toggle Recent Tabs, Open Settings. |
+| F8 | Commands: Enable, Disable, Select Model, Refresh Models, Test Connection, Toggle Recent Tabs, Toggle Workspace Context, Open Settings. |
 | F9 | Respect `CancellationToken`. Abort the HTTP request when the request is superseded, times out, the model switches, or the extension deactivates. |
 | F10 | Skip completion for languages in `disabledLanguages`, in secret files (§14), and when IntelliSense has a selected item (`context.selectedCompletionInfo`). |
 
@@ -105,7 +105,7 @@ flowchart LR
   OLL -->|HTTP| OLLAMA
 ```
 
-Dependencies point one way. `ollama.ts`, `config.ts`, `context.ts`, `prompt.ts` and `filter.ts` do not import `vscode`, so unit tests run in plain Node with no mocking. `models.ts`, `provider.ts` and `extension.ts` are the only modules that touch the VS Code API.
+Dependencies point one way. Phase 9 adds `retrieve.ts` (used by `provider.ts`) and `indexer.ts` (owned by `extension.ts`, feeds `retrieve.ts`). `ollama.ts`, `config.ts`, `context.ts`, `prompt.ts`, `filter.ts` and `retrieve.ts` do not import `vscode`, so unit tests run in plain Node with no mocking. `models.ts`, `provider.ts`, `indexer.ts` and `extension.ts` are the only modules that touch the VS Code API.
 
 ## 6. Component Responsibilities
 
@@ -119,6 +119,8 @@ Dependencies point one way. `ollama.ts`, `config.ts`, `context.ts`, `prompt.ts` 
 | `prompt.ts` | `buildRequest(ctx, profile, settings)` → the `/api/generate` body. Holds the built-in raw FIM template table. | no |
 | `filter.ts` | `cleanCompletion(raw, ctx, opts)` → `string \| undefined`. | no |
 | `provider.ts` | Debounce, skip rules, single-flight abort, stale checks, and building the `InlineCompletionItem`. | yes |
+| `retrieve.ts` | Phase 9. Chunking, tokenizing, definition detection, the in-memory inverted index, and picking chunks for a query (§10). | no |
+| `indexer.ts` | Phase 9. Background discovery (`findFiles`, root `.gitignore`), async reads, pacing, the file watcher, and progress for the tooltip. | yes |
 
 This is flatter than the structure proposed in the requirements: each concern is one file until it outgrows it. A `commands/` folder or a `templates/` directory adds indirection with no benefit at this size.
 
@@ -284,14 +286,16 @@ Acceptance and dismissal use VS Code's built-in keybindings: Tab (`editor.action
 
 ### Context
 
-- Source: the current document. With `recentTabs` on (default, Phase 6), also recently used open tabs. No workspace scan, and no files that aren't open.
+- Source: the current document. With `recentTabs` on (default, Phase 6), also recently used open tabs. With `workspaceContext` on (default, Phase 9), also chunks of other workspace files from an in-memory index.
+- Workspace index (Phase 9, design: `docs/superpowers/specs/2026-11-10-workspace-context-design.md`): only while autocomplete is enabled, a model is set and `workspaceContext` is on. A few seconds after activation, `indexer.ts` lists files with `findFiles` (honoring `files.exclude`, a built-in exclude for `node_modules`, `.git`, `dist`, `out`, `build`, `target`, `vendor`, `.venv`, `coverage`, and the simple lines of each folder's root `.gitignore`; `findFiles2`/`useIgnoreFiles` is proposed-only in 1.101). It reads one file per step with `workspace.fs.readFile`, yields between steps, and pauses while a completion is in flight. It skips secret files, files over 256 KB, binaries (NUL in the first 8 KB), minified files, unknown extensions and `disabledLanguages` (language ids come from the installed extensions' `contributes.languages`, so no document is opened). Only files with an extension of an indexable language are listed, so the 5000-file cap is spent on code. `files.exclude` entries with a `when` condition (e.g. `**/*.js` when `$(basename).ts` exists) are applied by checking for the sibling. A file watcher keeps it current: changed files are re-read (and dropped if no longer indexable), a deleted folder drops everything under it, creates are batched into one `findFiles` per folder after 500 ms, and a root `.gitignore`, `files.exclude`, `disabledLanguages`, workspace-folder or extension change rebuilds the index. Stale index entries are compacted once they outnumber live ones. Languages without a line comment (no `fileHeader`) are skipped, because their snippets would be dropped anyway. `retrieve.ts` keeps **no file text**: per file a token → chunk inverted index over non-overlapping 20-line chunks, plus a map of the names each file defines (top-level `const`/`let`/`var`, and `function`, `class`, `interface`, `type`, `enum`, `def`, `fn`, `func` and method heads at any indent) with their line. Snippet text is read from disk only when the picks change.
+- Workspace retrieval: the query is the last 21 lines of the prefix minus the partial identifier at the cursor, so typing inside a name never changes the result. Picks are deterministic and cached per result, so unchanged picks give byte-identical snippets with no disk read and Ollama's prompt cache holds. **Definitions first:** a free name (not after a `.`) used in the query, not declared anywhere in the current window (locals included), and *specific* (PascalCase, camelCase or snake_case; plain words like `text` are mostly locals) gets its definition, a 20-line snippet starting at the definition line. A name defined in more than 3 files is ambiguous and skipped, and so is a name the current file or a recent tab also defines (outside the window), since another file's same-named definition would be noise. **Similar code second:** a chunk with Jaccard similarity ≥ 0.2 and at least 3 shared tokens. Keywords and builtins are ignored, and tokens in more than 2000 chunks are skipped when counting overlap. At most 2 snippets, one per file, none from the current file or a recent-tab file, budget up to `maxContextChars / 4` on top of the others. Nothing is sent when nothing qualifies. The block goes between the recent tabs and the current file, most stable first. The definition rules came from `bench:context`: before them, local-variable and property-name lookups made noise outnumber hits (§11).
 - Recent tabs: the provider keeps a most-recently-active list of `file` URIs from `onDidChangeActiveTextEditor`. `extension.ts` saves it in `workspaceState` and restores it at activation, so it survives a restart. Per request, the provider takes the `recentTabsCount` (default 3) most recent files that are still in an open tab (`window.tabGroups`; a document VS Code still holds after its tab closed doesn't count), sit inside a workspace folder, aren't the current file, aren't in `disabledLanguages` and aren't secret files (§14). A restored tab that isn't loaded yet is opened with `openTextDocument` (async read, no editor shown). The secret check runs before opening.
 - What each tab contributes: its **outline**, the line of every top-level symbol and of each member of a class, interface, struct, enum, module or namespace, from `vscode.executeDocumentSymbolProvider`. A function's children are locals and are left out, and so are imports. Only the first line of a multi-line signature is kept. The outline is cached per document version and computed in the background. Until it arrives (the first request after a tab becomes recent, measured 277 ms for a cold TypeScript server), or when a language has no symbol provider, the file head is used instead. Each part is cut at a line boundary under its own `fileHeader`. The total budget is `maxContextChars / 4` (1500 by default), split evenly and added on top of the current file's budget. Languages without a line comment are skipped. The block goes first in the prompt, with the most recent tab last, nearest the cursor.
 - Why outlines and not the best-matching snippet: an outline holds the names a completion needs most densely, and it doesn't change while you type in another file. The start of the prompt stays identical between requests, so Ollama's prompt cache reuses it. A similarity-picked snippet would change on most keystrokes and defeat the cache.
 - Budget: `maxContextChars` (default 6000 ≈ 1.5k tokens). The prefix gets up to 75%, the suffix the rest. Unused suffix budget goes back to the prefix.
 - Cut at line boundaries: the prefix starts at a line start and the suffix ends at a line end.
 - Line endings: CRLF becomes LF in the prefix, the suffix and recent-tab heads (Phase 7). The filter compares the model's `\n` output with the suffix, and models are trained mostly on LF. VS Code converts the inserted text to the file's line endings.
-- Header: a one-line comment in the language's line-comment style, falling back to `//`: `<comment> File: <workspace-relative path> (<languageId>)`. It is prepended to the prefix. A relative path keeps the absolute path (username, folder layout) out of the prompt.
+- Header: a one-line comment in the language's line-comment style, falling back to `//`: `<comment> File: <workspace-relative path> (<languageId>)`, prefixed with the folder name in a multi-root workspace (Phase 9, so same-named files in two folders stay apart). It is prepended to the prefix. A relative path keeps the absolute path (username, folder layout) out of the prompt.
 - Imports and declarations: v1 relies on the prefix window, which already covers the top of most files under ~150 lines. **Phase 3 (done):** if the prefix window starts below line 0, prepend the file head up to the last line matching `^(import|from|#include|using|require|use)\b` within the first 50 lines. Taking the whole head, rather than only the matching lines, keeps multi-line imports intact. The block counts against the prefix budget and is skipped entirely if it exceeds 25% of the budget, never cut mid-import. The import pattern is a heuristic and its value must be measured.
 - `num_ctx` (default 4096) must exceed the prompt tokens plus `maxTokens`. With the defaults, 6000 chars ≈ 1.5–2k tokens + 128 output fits easily.
 
@@ -350,6 +354,37 @@ An earlier 7b-only run measured p50 772 ms and p95 3809 ms, so single runs vary 
 
 Reading the extra ~370 prompt tokens costs 4–51 ms. The p50 and p95 move more than that, so most of the difference is run-to-run noise or different output, not prompt reading. These neighbor files are unrelated to the fixture, so the empty counts say nothing about quality yet. Judge that in real use.
 
+**Workspace context (2026-11-10, `bench:context`, no Ollama):**
+
+| Measure | Value | Budget (`test/workspace-perf.test.ts`) |
+|---|---|---|
+| Build, synthetic 5000 files | 630 ms (7931 files/s), excluding the indexer's 5 ms pause per file | — |
+| Index heap, 5000 files | 29.8–31.1 MB | ≤ 70 MB |
+| Retrieval p50 / p95 | 0.06 / 0.08 ms | p95 ≤ 5 ms |
+| Longest indexing step (one 256 KB file) | 7.5–12.2 ms across runs | ≤ 16 ms |
+
+Retrieval quality on this repo (27 fixtures: every `src/` file at 30/60/90%, other `src/` and `test/` files indexed). A *hit* means a snippet holds a name the real next 10 lines use and the prefix doesn't show:
+
+| Rules | Hit | Noise | Silent |
+|---|---|---|---|
+| First version (every const, every name) | 13 | 14 | 0 |
+| + top-level consts, free names, specific names, window locals | 5 | 3 | 19 |
+| `MIN_SIM` 0.1 / 0.15 / 0.2 / 0.3 | 14 / 8 / 5 / 4 | 10 / 11 / 3 / 3 | 3 / 8 / 19 / 20 |
+| Final code, 30 fixtures (`indexer.ts` added to `src/`) | 5 | 5 | 20 |
+
+In the final run, the noise is the definitions of called functions (`Settings`, `recentBlock` ×2, `isSecretFile`), which give the model the real signature, and test files that resemble the code they test. The metric counts a snippet as noise whenever the next 10 lines don't reuse one of its names, so it undercounts definitions.
+
+End to end (2026-11-10, warm, `npm run bench`, same 20 fixtures, Ollama prompt cache cold per fixture):
+
+| Model | Context | p50 | p95 | Prompt eval (avg) | Empty |
+|---|---|---|---|---|---|
+| `qwen2.5-coder:7b` | off / recent / recent+workspace | 598 / 865 / 615 ms | 2332 / 2346 / 2105 ms | 1118 / 1476 / 1533 tok | 4 / 6 / 6 |
+| `qwen2.5-coder:1.5b` | off / recent / recent+workspace | 214 / 195 / 198 ms | 888 / 799 / 726 ms | 1118 / 1476 / 1533 tok | 8 / 10 / 11 |
+
+Workspace snippets add 57 prompt tokens on average, because most fixtures get none. Latency moves within run-to-run noise. The empty counts can't judge quality, since every fixture is this repo's own code.
+
+`MIN_SIM` stays 0.2. At 0.1, 10 of 27 requests would carry noise instead of 3, which works against the "not noisier" goal. 27 fixtures are too few to fine-tune (0.15 scores worse than both of its neighbours), so revisit with `workspace_hits` from real use.
+
 **Trade-offs:** 1.5B models are fast enough for CPU but weaker at multi-line. 7B models are a good GPU default. 14B+ usually exceeds the latency budget for typing-speed completion. Recommend `qwen2.5-coder:1.5b` (CPU) or `qwen2.5-coder:7b` (GPU) in the README.
 
 ## 12. Cancellation and Concurrency
@@ -386,6 +421,7 @@ All settings live under `localAutocomplete.*` in `package.json` `contributes.con
 | `disabledLanguages` | string[] | `["plaintext", "markdown", "scminput"]` | Language ids | `window` | No completions in these languages. |
 | `recentTabs` | boolean | `true` | — | `window` | Also send outlines of recently used open tabs (§10). Toggled by the Toggle Recent Tabs command. |
 | `recentTabsCount` | integer | `3` | 1–10 | `window` | How many recent tabs to include. |
+| `workspaceContext` | boolean | `true` | — | `window` | Index the workspace in the background and send relevant chunks of other files (§10). Toggled by the Toggle Workspace Context command. |
 
 Fixed internally, not settings: `top_p: 0.9`, the 15-line cap, the 75/25 prefix split, and the 10 s offline backoff.
 
@@ -403,6 +439,7 @@ VS Code resolves Default < User < Workspace < Workspace Folder **[Confirmed]**. 
 - **Secret files:** a built-in, non-configurable file-name pattern (`isSecretFile` in `context.ts`) covers `.env` and `.env.*`, `.envrc`, `.npmrc`, `.pypirc`, `.netrc`, `.pgpass`, `.htpasswd`, `.git-credentials`, SSH private keys (`id_rsa`, `id_ed25519`, …, not `.pub`), `credentials` and `credentials.*` data files, `secret(s).{json,yaml,toml,env,txt}`, `local.settings.json`, and `*.pem/.key/.p12/.pfx/.jks/.keystore/.tfvars/.tfstate`. Such files get no completions and are never sent as recent-tab context, even to a local endpoint. Source files named like `secrets.ts` are not matched. It has no setting, so a workspace cannot weaken it.
 - **Exclusions:** `disabledLanguages` covers prose and anything else the pattern misses. User-defined glob exclusions are an Open Question.
 - **Recent tabs:** only files open in a tab inside a workspace folder with scheme `file` are sent, never files outside the workspace (such as `~/.ssh/config`) and never a tab you closed. Their outlines or heads go to the same single endpoint, so a non-local endpoint now receives more of your code. The endpoint warning covers this. The recent list (absolute file URIs) is stored in VS Code's local `workspaceState`. It is never logged and never sent.
+- **Workspace context (Phase 9):** files that aren't open can be sent, but only from inside a workspace folder, never secret files, ignored or excluded files, and only to the single endpoint. The non-local endpoint warning says workspace files may be sent. The index lives in memory only and is never written to disk or logged.
 
 ## 15. Error Handling
 
@@ -432,6 +469,8 @@ A successful request resets the status bar to normal. State transitions are logg
 | Mocked API | Vitest + stubbed `globalThis.fetch` | `ollama.ts` error mapping (refused, timeout, 404, 400 insert, 500, bad JSON), abort propagation, request body shape | no |
 | Concurrency (`test/provider.test.ts`) | Vitest, deferred `fetch` stub, `vscode` aliased to `test/vscode.ts` | single-flight abort, model change drops the result, debounce collapses N calls into 1, offline backoff, cold-model tracking | no |
 | Integration (`test/integration/`, `npm run test:integration`) | `@vscode/test-electron` (downloads VS Code into `.vscode-test/` once), plain `node:assert` | Activation, commands registered, ghost text accepted via `editor.action.inlineSuggest.commit` against a fake Ollama (Node `http`, random port) serving `/api/tags`, `/api/show`, `/api/generate`; the generate body carries the suffix and no absolute path | no (fake server) |
+| Performance (`test/workspace-perf.test.ts`, Phase 9) | Vitest, seeded synthetic 5000-file workspace | Retrieval p95 ≤ 5 ms, longest indexing step (one 256 KB file) ≤ 16 ms, heap ceiling, identical result for a repeated query | no |
+| Retrieval quality (`npm run bench:context`, Phase 9) | script, not in CI | Index build time, retrieval p50/p95, memory, and hit / noise / silent counts on this repo's `src/` fixtures | no |
 | Manual / optional | `npm run bench`, checklist below | Real models: `qwen2.5-coder:1.5b`, `qwen2.5-coder:7b`, `deepseek-coder:6.7b`, `codegemma:2b`, one non-code model (prefix-only path) | yes |
 
 `models.ts` and `provider.ts` are tested with the real classes. `vitest.config.ts` aliases `vscode` to `test/vscode.ts`, a stub with only the members those modules touch (`Range`, `InlineCompletionItem`, `SymbolKind`, `TabInputText`, `Uri.parse`, `workspace.getConfiguration`/`textDocuments`/`openTextDocument`/`getWorkspaceFolder`/`asRelativePath`, `window.showWarningMessage`/`tabGroups`, `commands.executeCommand`). Tests replace `textDocuments`, `tabGroups`, `openTextDocument` and `executeCommand` per case and reset them in `afterEach`. Extend the stub only when a test needs it. Don't mock the whole API.
@@ -466,11 +505,13 @@ Manual checklist per model: completes a function body; completes mid-line with a
 │   ├── context.ts
 │   ├── prompt.ts
 │   ├── filter.ts
+│   ├── retrieve.ts
+│   ├── indexer.ts
 │   └── provider.ts
 ├── output/                   # npm run package writes the .vsix here (gitignored)
 ├── vitest.config.ts          # aliases `vscode` to the test stub
 ├── test/                     # *.test.ts (Vitest), vscode.ts stub, integration/ (run.ts launcher, suite.ts)
-└── scripts/bench.ts          # latency benchmark, `npm run bench -- <model>`
+└── scripts/                  # bench.ts (`npm run bench -- <model>`), bench-context.ts (`npm run bench:context`)
 ```
 
 ## 18. Development and Packaging
@@ -506,6 +547,7 @@ Versioning: SemVer in `package.json`. Bump the minor version per phase and the p
 | **6. Recent tabs context** | `recentTabs` / `recentTabsCount` settings, most-recently-active tracking persisted in `workspaceState`, open-tab check, symbol outlines with head fallback, `recentBlock` in `prompt.ts`, built-in secret-file exclusion, Toggle Recent Tabs command, `recent_chars`/`prompt_eval`/`prompt_ms` in the debug line, bench variant **[Done in 0.6.0]** | 1–5 | Unit tests cover the secret pattern, budget split, prompt order, closed and restored tabs, and the head-to-outline switch. The integration test sees a real TypeScript outline in the prompt and never the `.env`. Bench p50 is recorded with and without recent tabs for 2 models. Manual: with a types file open in a recent tab, a completion uses a name that exists only in that file. Turning `recentTabs` off drops `recent_chars` to 0 in the debug log. |
 | **7. Auto-closed suffix** | **[Done in 0.7.0]** Fix ghost text that leaves auto-closed characters behind, e.g. `console.log("\|")` → `console.log("userDetailsData", userDetailsData)")`. Cause: the model completes the whole call, but the item is inserted at the cursor with an empty range, so the editor's auto-closed `")` stays after it. §10 rule 3 cannot help: its 3-char minimum skips the 2-char `")`, and trimming the model's `)` would still leave `userDetailsData")`. Fix: `replacesRest` in `filter.ts` (§10 rule 7), with `provider.ts` setting the item range to [cursor, end of the trimmed line] when it holds. A completion that stays balanced (`a(b)` before `)`) keeps the plain insert. Also, from the 2026-11-10 audit: CRLF → LF in the context (§10), the import block keeps an import on line 50, a missing model is probed again after the backoff (§8), a bare `404 page not found` no longer counts as a missing model, and a recent-tab outline is skipped if the file changed while symbols were computed. | 3 | Unit tests: both screenshot cases (`")` and `if(\|)`) and a Python `print('\|')` replace the rest of the line, while `a(b)` before `)`, `userDetailsData` before `")`, multi-line output and an empty rest stay plain inserts. Unit tests for CRLF trimming, the line-50 import, the `404 page not found` mapping, and missing-model recovery. The integration test accepts `x", x)` inside `console.log("\|")` in real VS Code and gets `console.log("x", x)`. Manual: the screenshot case in TypeScript and Python (`print('\|')`) shows the right ghost text, and Tab gives a line with no doubled closers. |
 | **8. Balanced completions** | **[Done in 0.8.0]** Two more filter rules (plan: `docs/superpowers/plans/2026-11-10-balanced-completions.md`). §10 rule 8: in multi-line mode, cut before the first closing bracket the completion did not open itself when the suffix's first non-whitespace char is that same closer, so a `}` the code already has is not doubled (strings skipped, no comment awareness). §10 rule 9: `fitLine` in single-line mode shows nothing when inserting would turn a balanced cursor line into an unbalanced one. Debug `outcome=unbalanced`. | 7 | Unit tests: closers inside strings, blocks the completion closes itself, needed closers before a different suffix closer, escaped quotes, and already-unbalanced lines are left alone. Manual: in TypeScript, a function body typed before an auto-closed `}` has no doubled `}`. In `foo(\|)`, no ghost text leaves an extra `)` or an open quote. |
+| **9. Workspace context** | **[Done in 0.9.0]** In-memory lexical index of the workspace, built in the background (design: `docs/superpowers/specs/2026-11-10-workspace-context-design.md`). `retrieve.ts` (chunks, tokens, definitions, inverted index, picking), `indexer.ts` (discovery, root `.gitignore`, pacing, watcher), `workspaceContext` setting, Toggle Workspace Context command, tooltip progress, `workspace_chars`/`workspace_ms`/`workspace_hits` in the debug line, endpoint warning text, `test/workspace-perf.test.ts`, `npm run bench:context`, a third `bench` variant. | 6 | Unit tests: chunking, tokenizing, definition detection, definition match above similarity, exclusions (current file, recent tabs, secrets), unrelated code returns nothing, budget cut. Perf test passes its budgets. Integration: a closed file's `computeInvoiceTotal` definition reaches the prompt; `.env` and `node_modules/` never do. `bench:context` recorded in §11 with noise below hits. `bench` recorded for 2 models across off / recent tabs / recent tabs + workspace. Manual: a completion uses a name that exists only in a closed file; a 2k+ file repo shows no typing lag while indexing; toggling off drops `workspace_chars` to 0. |
 
 ## 20. Acceptance Criteria (critical workflows)
 
@@ -538,3 +580,4 @@ Versioning: SemVer in `package.json`. Bump the minor version per phase and the p
 5. Is streaming with early termination worth it, based on Phase 4 `eval_count` data?
 6. Is the leading-imports context heuristic (Phase 3) measurably better than the plain prefix window?
 7. Do recent-tab outlines improve completions in real use? Would Qwen's native repo format (`<|repo_name|>`, `<|file_sep|>`) make the model use them better than `// File:` comments?
+8. Does lexical retrieval (Phase 9) hit often enough, or would embeddings (`/api/embed` with a second model) be worth the VRAM? Decide from `bench:context` and real use.

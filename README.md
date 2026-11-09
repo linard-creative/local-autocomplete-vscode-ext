@@ -1,6 +1,13 @@
-# Local Autocomplete
+<p align="center">
+  <img src="assets/icon/icon.png" alt="Local Autocomplete icon" width="128">
+</p>
 
-Inline ghost-text code completions from models running in your own [Ollama](https://ollama.com). Your code goes to Ollama only, and there is no telemetry. The extension has zero runtime dependencies.
+<h1 align="center">Local Autocomplete</h1>
+
+<p align="center">
+  Inline ghost-text code completions from models running in your own <a href="https://ollama.com">Ollama</a>.<br>
+  Your code goes to Ollama only, and there is no telemetry. The extension has zero runtime dependencies.
+</p>
 
 ## Requirements
 
@@ -48,6 +55,7 @@ All are under **Local Autocomplete** in the Command Palette:
 - **Refresh Available Models**: re-reads the model list and capabilities
 - **Test Ollama Connection**: shows the Ollama version, or why it can't connect
 - **Toggle Recent Tabs Context**: turns recent-tab context on or off. The status bar tooltip shows the current state.
+- **Toggle Workspace Context**: turns workspace context on or off. The status bar tooltip shows indexing progress.
 - **Open Extension Settings**
 
 ## Settings
@@ -67,14 +75,27 @@ All are under **Local Autocomplete** in the Command Palette:
 | `localAutocomplete.disabledLanguages` | `plaintext`, `markdown`, `scminput` | Language ids with no completions |
 | `localAutocomplete.recentTabs` | `true` | Also send an outline (declarations, no function bodies) of your most recently used open files, so suggestions know names from other files |
 | `localAutocomplete.recentTabsCount` | `3` | How many recent tabs to include (1–10) |
+| `localAutocomplete.workspaceContext` | `true` | Index the workspace in the background and send up to 2 relevant snippets of other files (see Workspace context) |
+
+## Workspace context
+
+Suggestions can use code from files that aren't open. While autocomplete is on and a model is selected, the extension starts reading your workspace one file at a time in the background, a few seconds after VS Code starts. It pauses while a suggestion is being generated, so typing never slows down. The index lives in memory only and is rebuilt on each start.
+
+For each suggestion it adds at most 2 snippets:
+
+- **Definitions first:** when the code near the cursor uses a name like `computeInvoiceTotal` or `UserProfile` that another file defines, that definition is sent.
+- **Similar code second:** a chunk of another file that shares many names with the code before the cursor.
+- **Nothing** when nothing clearly matches. Most suggestions get no extra snippets.
+
+Never read: secret files (see Privacy), files over 256 KB, binary and minified files, `node_modules`, `.git`, `dist`, `out`, `build`, `target`, `vendor`, `.venv`, `coverage`, anything in `files.exclude` (including `when` conditions such as compiled `.js` next to its `.ts`) or in the root `.gitignore`, and languages in `disabledLanguages`. At most 5000 files are indexed.
 
 ## Privacy
 
-- The only network peer is the configured endpoint. What is sent: the code around the cursor and its workspace-relative path, never the absolute path. With **Recent Tabs** on, also an outline of your 3 most recently used tabs that are still open inside the workspace: their declaration lines, or the top of the file until the outline is ready.
+- The only network peer is the configured endpoint. What is sent: the code around the cursor and its workspace-relative path, never the absolute path. With **Recent Tabs** on, also an outline of your 3 most recently used tabs that are still open inside the workspace: their declaration lines, or the top of the file until the outline is ready. With **Workspace Context** on, also up to 2 snippets of other files in the workspace (see Workspace context).
 - `endpoint` and `model` are machine-scoped. A cloned repository's `.vscode/settings.json` cannot redirect your code to another server.
 - A non-local endpoint (anything other than `localhost`, `127.x` or `::1`) shows a warning once per session.
 - The **Local Autocomplete** output channel logs metadata only (model, timings, sizes), never code, prompts or completions.
-- **Secret files:** `.env` and `.env.*`, `.envrc`, `.npmrc`, `.pypirc`, `.netrc`, `.git-credentials`, SSH private keys, `credentials` files, `secrets.json`/`.yaml`, `local.settings.json`, and `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.tfvars`, `*.tfstate` never get completions and are never sent as recent-tab context, even to a local Ollama. To exclude other files, add their language id to `disabledLanguages`. Check a file's id via **Change Language Mode** in the status bar.
+- **Secret files:** `.env` and `.env.*`, `.envrc`, `.npmrc`, `.pypirc`, `.netrc`, `.git-credentials`, SSH private keys, `credentials` files, `secrets.json`/`.yaml`, `local.settings.json`, and `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.tfvars`, `*.tfstate` never get completions and are never read or sent as context, even to a local Ollama. To exclude other files, add their language id to `disabledLanguages`. Check a file's id via **Change Language Mode** in the status bar.
 
 ## Troubleshooting
 

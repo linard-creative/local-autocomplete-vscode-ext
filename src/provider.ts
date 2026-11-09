@@ -4,6 +4,7 @@ import type { Settings } from './config';
 import { buildContext, isSecretFile } from './context';
 import { cleanCompletion, fitLine } from './filter';
 import { settings, type ModelService } from './models';
+import type { WorkspaceIndexer } from './indexer';
 import { generate, OllamaError } from './ollama';
 import { buildRequest, recentBlock, type RecentFile } from './prompt';
 
@@ -11,8 +12,9 @@ import { buildRequest, recentBlock, type RecentFile } from './prompt';
 const COLD_TIMEOUT_MS = 30_000;
 
 // Relative path only: absolute paths leak usernames and folder layout into the prompt.
-const relPath = (uri: vscode.Uri) =>
-  vscode.workspace.getWorkspaceFolder(uri) ? vscode.workspace.asRelativePath(uri, false) : basename(uri.path);
+// The default prefixes the folder name only with several workspace folders, so same-named files in two folders stay apart.
+export const relPath = (uri: vscode.Uri) =>
+  vscode.workspace.getWorkspaceFolder(uri) ? vscode.workspace.asRelativePath(uri) : basename(uri.path);
 
 /**
  * Line of each top-level symbol and of each member of a class-like one, in file order.
@@ -59,6 +61,13 @@ export class LocalInlineCompletionProvider implements vscode.InlineCompletionIte
   /** File URIs in the order they were last active, most recent first. Persisted per workspace by extension.ts. */
   recent: string[] = [];
   private outlines = new Map<string, { version: number; text?: string }>();
+  /** Background workspace index, set by extension.ts (spec §10, Phase 9). */
+  workspace?: Pick<WorkspaceIndexer, 'snippets'>;
+
+  /** A request is in flight; the indexer pauses meanwhile. */
+  get busy(): boolean {
+    return this.current !== undefined;
+  }
 
   constructor(
     private readonly log: vscode.LogOutputChannel,
@@ -145,9 +154,20 @@ export class LocalInlineCompletionProvider implements vscode.InlineCompletionIte
     try {
       const profile = await this.models.profile(s, signal);
       const ctx = buildContext(document.getText(), document.offsetAt(position), s.maxContextChars);
-      // Recent tabs get a quarter of the current file's budget on top of it.
-      const recent = s.recentTabs ? recentBlock(await this.recentFiles(document, s), Math.floor(s.maxContextChars / 4)) : '';
-      const body = buildRequest(ctx, { path: relPath(document.uri), languageId: document.languageId }, profile, s, recent);
+      // Recent tabs and workspace snippets each get a quarter of the current file's budget on top of it.
+      const budget = Math.floor(s.maxContextChars / 4);
+      const path = relPath(document.uri);
+      const recentFiles = s.recentTabs ? await this.recentFiles(document, s) : [];
+      const recent = recentBlock(recentFiles, budget);
+      const wsStarted = Date.now();
+      const ws =
+        s.workspaceContext && this.workspace
+          ? await this.workspace.snippets(ctx.prefix, ctx.prefix + ctx.suffix, new Set([path, ...recentFiles.map((f) => f.path)]))
+          : undefined;
+      const wsMs = Date.now() - wsStarted;
+      const wsBlock = ws ? recentBlock(ws.files, budget) : '';
+      // Most stable first, so Ollama's prompt cache keeps as much as possible.
+      const body = buildRequest(ctx, { path, languageId: document.languageId }, profile, s, recent + wsBlock);
 
       const started = Date.now();
       const res = await generate(s.endpoint, body, signal);
@@ -163,7 +183,7 @@ export class LocalInlineCompletionProvider implements vscode.InlineCompletionIte
       const ms = (ns?: number) => (ns === undefined ? '?' : Math.round(ns / 1e6));
       const tokS = res.eval_count && res.eval_duration ? (res.eval_count / (res.eval_duration / 1e9)).toFixed(1) : '?';
       this.log.debug(
-        `model=${s.model} prompt_chars=${body.prompt.length} recent_chars=${recent.length} total_ms=${Date.now() - started} load_ms=${ms(res.load_duration)} prompt_eval=${res.prompt_eval_count ?? '?'} prompt_ms=${ms(res.prompt_eval_duration)} eval_count=${res.eval_count ?? '?'} tok_s=${tokS} done=${res.done_reason ?? '?'} outcome=${stale ? 'stale' : !text ? 'empty' : !fit ? 'unbalanced' : 'shown'}`,
+        `model=${s.model} prompt_chars=${body.prompt.length} recent_chars=${recent.length} workspace_chars=${wsBlock.length} workspace_ms=${wsMs} workspace_hits=${ws?.kinds || '-'} total_ms=${Date.now() - started} load_ms=${ms(res.load_duration)} prompt_eval=${res.prompt_eval_count ?? '?'} prompt_ms=${ms(res.prompt_eval_duration)} eval_count=${res.eval_count ?? '?'} tok_s=${tokS} done=${res.done_reason ?? '?'} outcome=${stale ? 'stale' : !text ? 'empty' : !fit ? 'unbalanced' : 'shown'}`,
       );
       if (!text || !fit) return;
       const end = fit === 'replace' ? position.translate(0, rest.length) : position;

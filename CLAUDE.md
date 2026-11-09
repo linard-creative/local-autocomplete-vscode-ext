@@ -18,7 +18,7 @@ Run typecheck, lint and test before calling a change done.
 - Zero runtime dependencies. Dev dependencies only.
 - `src/ollama.ts` is the only module that may call `fetch` (eslint-enforced). Never call `/api/pull`, `/api/delete` or any non-Ollama host.
 - Never log source code, prompts, completions or absolute paths. Log metadata only.
-- `context.ts`, `prompt.ts`, `filter.ts`, `ollama.ts`, `config.ts` must not import `vscode` so they stay unit-testable.
+- `context.ts`, `prompt.ts`, `filter.ts`, `ollama.ts`, `config.ts`, `retrieve.ts` must not import `vscode` so they stay unit-testable.
 - Implement the roadmap phase by phase (spec §19). Update the spec when a decision changes.
 - When a phase is done, add `docs/milestones/phase-N.md` and update its index row. Check an acceptance box only once it is verified; manual items need the user's confirmation.
 

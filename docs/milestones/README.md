@@ -12,6 +12,7 @@ One file per finished roadmap phase (spec §19). Add a file when a phase ships a
 | 6. Recent tabs context | Done | 0.6.0 | [phase-6.md](phase-6.md) |
 | 7. Auto-closed suffix | Done | 0.7.0 | [phase-7.md](phase-7.md) |
 | 8. Balanced completions | Done | 0.8.0 | [phase-8.md](phase-8.md) |
+| 9. Workspace context | Done | 0.9.0 | [phase-9.md](phase-9.md) |
 
 ## Phases
 
@@ -46,5 +47,9 @@ When the completion already contains the rest of the line (e.g. auto-closed `")`
 ### 8. Balanced completions — done
 
 Two more filter rules. Multi-line: cut a closing bracket the code after the cursor already supplies (no more `}\n}`). Single-line: show nothing when inserting would break a balanced line. Plan: [2026-11-10-balanced-completions.md](../superpowers/plans/2026-11-10-balanced-completions.md).
+
+### 9. Workspace context — done
+
+A background, in-memory index of the workspace. Each suggestion gets up to 2 snippets of other files, including closed ones: the definition of a name used near the cursor, or similar code, and nothing when nothing clearly matches. Performance budgets run in `npm test`; `npm run bench:context` measures hit vs noise. Design: [2026-11-10-workspace-context-design.md](../superpowers/specs/2026-11-10-workspace-context-design.md), plan: [2026-11-10-workspace-context.md](../superpowers/plans/2026-11-10-workspace-context.md).
 
 Each phase file contains: what shipped, acceptance status (spec §19), and any decisions or deviations from the spec.
