@@ -24,4 +24,6 @@ Run typecheck, lint and test before calling a change done.
 
 ## Coding style
 
+Before writing or changing any code, invoke the `ponytail` skill (Skill tool) and follow it.
+
 @.claude/skills/ponytail/SKILL.md

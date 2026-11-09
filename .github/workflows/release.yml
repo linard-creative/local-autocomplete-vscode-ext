@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: [CHANGELOG.md]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Changelog edits without a version bump (typo fixes) must not re-release.
+      - name: Skip if this version is already released
+        id: check
+        run: |
+          V=$(node -p "require('./package.json').version")
+          echo "V=$V" >> "$GITHUB_ENV"
+          if gh release view "v$V" > /dev/null 2>&1; then
+            echo "v$V already released, nothing to do"
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.check.outputs.new
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - if: steps.check.outputs.new
+        run: npm ci
+      - if: steps.check.outputs.new
+        run: npm run typecheck
+      - if: steps.check.outputs.new
+        run: npm run lint
+      - if: steps.check.outputs.new
+        run: npm test
+
+      - name: Read changelog section
+        if: steps.check.outputs.new
+        run: |
+          awk -v h="## $V" '$0==h{f=1;next} /^## /{f=0} f' CHANGELOG.md > notes.md
+          [ -s notes.md ] || { echo "CHANGELOG.md has no '## $V' section"; exit 1; }
+
+      - if: steps.check.outputs.new
+        run: npm run package
+
+      - name: Create GitHub release with the .vsix
+        if: steps.check.outputs.new
+        run: gh release create "v$V" "output/local-autocomplete-$V.vsix" --target "$GITHUB_SHA" --title "v$V" --notes-file notes.md
