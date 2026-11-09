@@ -84,6 +84,18 @@ export async function run(): Promise<void> {
     assert.ok(last.startsWith(outline), `recent tab sent as its outline, got: ${last.slice(0, 200)}`);
     assert.ok(!last.includes('readFileSync(id'), 'function bodies are not in the outline');
     assert.ok(generates.every((g) => !String(g.prompt).includes('hunter2')), '.env is never sent');
+
+    // Phase 7: the completion closes the call itself, so it replaces the auto-closed `")` instead of doubling it.
+    replies['/api/generate'] = { response: 'x", x)', done: true, done_reason: 'stop' };
+    const call = await vscode.workspace.openTextDocument({ language: 'typescript', content: 'console.log("")\n' });
+    const callEditor = await vscode.window.showTextDocument(call);
+    callEditor.selection = new vscode.Selection(0, 13, 0, 13);
+    for (let i = 0; i < 50 && call.lineAt(0).text === 'console.log("")'; i++) {
+      await vscode.commands.executeCommand('editor.action.inlineSuggest.trigger');
+      await sleep(100);
+      await vscode.commands.executeCommand('editor.action.inlineSuggest.commit');
+    }
+    assert.equal(call.lineAt(0).text, 'console.log("x", x)', 'auto-closed characters are replaced, not doubled');
   } finally {
     server.close();
   }

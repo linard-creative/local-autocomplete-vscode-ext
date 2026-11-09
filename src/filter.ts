@@ -34,3 +34,21 @@ export function cleanCompletion(raw: string, ctx: CompletionContext, truncated =
 
   return text.trim() ? text : undefined;
 }
+
+const balanced = (line: string): boolean => {
+  const s = line.replace(/\\./g, '');
+  const n = (c: string) => s.split(c).length - 1;
+  return n('(') === n(')') && n('[') === n(']') && n('{') === n('}') && ['"', "'", '`'].every((q) => n(q) % 2 === 0);
+};
+
+/**
+ * True when the completion should replace `rest` (the code after the cursor on its line, e.g. an auto-closed `")`)
+ * instead of going in front of it. `rest` must appear in the completion in order, so nothing typed is lost,
+ * and only the replaced line may balance its brackets and quotes.
+ */
+export function replacesRest(before: string, text: string, rest: string): boolean {
+  if (!rest || text.includes('\n')) return false;
+  let i = 0;
+  for (const c of text) if (c === rest[i]) i++;
+  return i === rest.length && balanced(before + text) && !balanced(before + text + rest);
+}

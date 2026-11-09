@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.0
+
+- Suggestions no longer leave auto-closed characters behind: typing `console.log("` or `if(` and accepting gives `console.log("a", a)` and `if(!a) return null;` instead of an extra `")` or `)` at the end of the line
+- Files with Windows line endings (CRLF) no longer get doubled closing braces, and the model now sees LF line endings
+- A model that was missing comes back by itself within 10 s of `ollama pull`. An endpoint with a wrong path (e.g. ending in `/api`) now shows an Ollama error instead of "model not installed".
+- Imports on line 50 of a long file are kept in the context, and a rare unhandled error in recent-tab outlines is gone
+
 ## 0.6.0
 
 - Recent tabs context: an outline (declaration lines from VS Code's symbol provider) of your 3 most recently used open tabs is sent along with the current file (`recentTabs`, `recentTabsCount`, **Toggle Recent Tabs Context** command). The list survives a restart, and closed tabs are never sent.

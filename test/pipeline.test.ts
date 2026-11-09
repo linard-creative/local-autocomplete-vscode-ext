@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { endpointProblem, readSettings } from '../src/config';
 import { buildContext, isSecretFile, isSingleLine } from '../src/context';
-import { cleanCompletion } from '../src/filter';
+import { cleanCompletion, replacesRest } from '../src/filter';
 import { buildRequest, fileHeader, findTemplate, recentBlock } from '../src/prompt';
 
 describe('buildContext', () => {
@@ -28,6 +28,19 @@ describe('buildContext', () => {
     expect(prefix.startsWith(imports + 'const x = 1;\n')).toBe(true);
     expect(prefix.endsWith('foo(')).toBe(true);
     expect(prefix.length).toBeLessThanOrEqual(1000);
+  });
+
+  it('keeps an import on line 50 of a long file', () => {
+    const head = 'const x = 1;\n'.repeat(49) + "import a from 'a';\n";
+    const text = head + 'y();\n'.repeat(300) + 'foo(';
+    expect(buildContext(text, text.length, 4000).prefix.startsWith(head)).toBe(true);
+  });
+
+  it('sends LF line endings for CRLF files, so suffix overlap is still trimmed', () => {
+    const text = 'function f() {\r\n  if (a) {\r\n    |\r\n  }\r\n}\r\n';
+    const ctx = buildContext(text.replace('|', ''), text.indexOf('|'), 1000);
+    expect(ctx).toEqual({ prefix: 'function f() {\n  if (a) {\n    ', suffix: '\n  }\n}\n' });
+    expect(cleanCompletion('return x;\n  }\n}', ctx)).toBe('return x;');
   });
 
   it('skips the import block when the whole file fits', () => {
@@ -99,6 +112,21 @@ describe('cleanCompletion', () => {
 
   it('drops empty output', () => {
     expect(cleanCompletion('  \n\n', multi)).toBeUndefined();
+  });
+});
+
+describe('replacesRest', () => {
+  it('replaces auto-closed characters the completion closes itself', () => {
+    expect(replacesRest('console.log("', 'userDetailsData", userDetailsData)', '")')).toBe(true);
+    expect(replacesRest('    if(', '!userDetailsData) return null;', ')')).toBe(true);
+    expect(replacesRest("print('", "hello')", "')")).toBe(true);
+  });
+
+  it('keeps a plain insert when the suffix is still needed', () => {
+    expect(replacesRest('foo(', 'a(b)', ')')).toBe(false);
+    expect(replacesRest('console.log("', 'userDetailsData', '")')).toBe(false);
+    expect(replacesRest('if(', 'a) {\n}', ')')).toBe(false);
+    expect(replacesRest('x = ', '1;', '')).toBe(false);
   });
 });
 

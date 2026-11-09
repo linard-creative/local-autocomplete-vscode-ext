@@ -62,7 +62,8 @@ describe('ollama client', () => {
   it('maps 404 "model not found" separately from other 404s', async () => {
     stubFetch(async () => Response.json({ error: "model 'm:1b' not found" }, { status: 404 }));
     expect(await kindOf(generate(url, body))).toBe('model-not-found');
-    stubFetch(async () => new Response('page missing', { status: 404 }));
+    // Ollama's reply for an unknown path, e.g. an endpoint ending in /api.
+    stubFetch(async () => new Response('404 page not found', { status: 404 }));
     expect(await kindOf(generate(url, body))).toBe('http');
   });
 

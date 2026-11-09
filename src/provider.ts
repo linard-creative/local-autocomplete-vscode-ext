@@ -2,7 +2,7 @@ import { basename } from 'node:path';
 import * as vscode from 'vscode';
 import type { Settings } from './config';
 import { buildContext, isSecretFile } from './context';
-import { cleanCompletion } from './filter';
+import { cleanCompletion, replacesRest } from './filter';
 import { settings, type ModelService } from './models';
 import { generate, OllamaError } from './ollama';
 import { buildRequest, recentBlock, type RecentFile } from './prompt';
@@ -36,6 +36,9 @@ function outlineText(doc: vscode.TextDocument, symbols: (vscode.DocumentSymbol |
   walk(symbols, true);
   return [...lines].sort((a, b) => a - b).map((l) => doc.lineAt(l).text.trimEnd()).join('\n') + '\n';
 }
+
+// Full text, LF only like the current file's context (recentBlock cuts it to a head).
+const head = (doc: vscode.TextDocument) => doc.getText().replace(/\r\n/g, '\n');
 
 function delay(ms: number, token: vscode.CancellationToken): Promise<boolean> {
   if (token.isCancellationRequested) return Promise.resolve(false);
@@ -104,16 +107,17 @@ export class LocalInlineCompletionProvider implements vscode.InlineCompletionIte
   private outline(doc: vscode.TextDocument): string {
     const key = doc.uri.toString();
     const hit = this.outlines.get(key);
-    if (hit?.version === doc.version) return hit.text ?? doc.getText();
+    if (hit?.version === doc.version) return hit.text ?? head(doc);
     const entry: { version: number; text?: string } = { version: doc.version };
     this.outlines.set(key, entry);
     void vscode.commands
       .executeCommand<(vscode.DocumentSymbol | vscode.SymbolInformation)[] | undefined>('vscode.executeDocumentSymbolProvider', doc.uri)
       .then(
-        (symbols) => (entry.text = symbols?.length ? outlineText(doc, symbols) : undefined),
+        // The file may have changed while symbols were computed; its lines may no longer exist.
+        (symbols) => (entry.text = doc.version === entry.version && symbols?.length ? outlineText(doc, symbols) : undefined),
         () => undefined,
       );
-    return doc.getText();
+    return head(doc);
   }
 
   async provideInlineCompletionItems(
@@ -123,7 +127,7 @@ export class LocalInlineCompletionProvider implements vscode.InlineCompletionIte
     token: vscode.CancellationToken,
   ): Promise<vscode.InlineCompletionItem[] | undefined> {
     const s = settings();
-    if (!s.enabled || !s.model || s.model === this.models.missing) return;
+    if (!s.enabled || !s.model) return;
     if (s.disabledLanguages.includes(document.languageId) || isSecretFile(document.fileName)) return;
     // IntelliSense has a selection: stay out of the language server's way.
     if (context.selectedCompletionInfo) return;
@@ -158,7 +162,11 @@ export class LocalInlineCompletionProvider implements vscode.InlineCompletionIte
       this.log.debug(
         `model=${s.model} prompt_chars=${body.prompt.length} recent_chars=${recent.length} total_ms=${Date.now() - started} load_ms=${ms(res.load_duration)} prompt_eval=${res.prompt_eval_count ?? '?'} prompt_ms=${ms(res.prompt_eval_duration)} eval_count=${res.eval_count ?? '?'} tok_s=${tokS} done=${res.done_reason ?? '?'} outcome=${stale ? 'stale' : text ? 'shown' : 'empty'}`,
       );
-      return text ? [new vscode.InlineCompletionItem(text, new vscode.Range(position, position))] : undefined;
+      if (!text) return;
+      const line = document.lineAt(position).text;
+      const rest = line.slice(position.character).trimEnd();
+      const end = replacesRest(line.slice(0, position.character), text, rest) ? position.translate(0, rest.length) : position;
+      return [new vscode.InlineCompletionItem(text, new vscode.Range(position, end))];
     } catch (e) {
       this.models.report(s.model, e instanceof OllamaError ? e : new OllamaError('invalid-response', String(e)));
       return;
