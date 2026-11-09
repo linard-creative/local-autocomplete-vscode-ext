@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { endpointProblem } from './config';
+import { WorkspaceIndexer } from './indexer';
 import { ModelService, settings } from './models';
 import { LocalInlineCompletionProvider } from './provider';
 
@@ -24,10 +25,23 @@ export function activate(context: vscode.ExtensionContext): void {
     void context.workspaceState.update('recentTabs', provider.recent);
   };
   noteActive(vscode.window.activeTextEditor);
+  const indexer = new WorkspaceIndexer(log, () => provider?.busy ?? false, render);
+  provider.workspace = indexer;
+  // Index only while completions can use it: no reading the workspace while autocomplete is off or has no model.
+  const syncIndex = () => {
+    const s = settings();
+    if (s.enabled && s.model && s.workspaceContext) indexer.start(); // no-op while already running
+    else indexer.stop();
+  };
+  const restartIndex = () => {
+    indexer.stop();
+    syncIndex();
+  };
 
   function render(): void {
     const s = settings();
-    status.tooltip = `Autocomplete Model: ${s.model || 'none'} (click to change)\nRecent tabs: ${s.recentTabs ? `on (${s.recentTabsCount})` : 'off'}`;
+    status.tooltip =
+      `Autocomplete Model: ${s.model || 'none'} (click to change)\nRecent tabs: ${s.recentTabs ? `on (${s.recentTabsCount})` : 'off'}\n${indexer.status}`;
     if (endpointProblem(s.endpoint) === 'invalid') status.text = '$(error) Invalid endpoint';
     else if (!s.enabled) status.text = '$(circle-slash) Autocomplete off';
     else if (!s.model) status.text = '$(sparkle) Select model';
@@ -52,7 +66,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const plain = endpoint.startsWith('http:') ? ' over unencrypted HTTP' : '';
     void vscode.window
       .showWarningMessage(
-        `Local Autocomplete will send your code to ${new URL(endpoint).host}${plain}. Only use endpoints you control.`,
+        `Local Autocomplete will send your code, including snippets of other workspace files, to ${new URL(endpoint).host}${plain}. Only use endpoints you control.`,
         'Keep',
         'Reset to localhost',
       )
@@ -79,9 +93,20 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('localAutocomplete.toggleRecentTabs', () =>
       config().update('recentTabs', !settings().recentTabs, vscode.ConfigurationTarget.Global),
     ),
+    vscode.commands.registerCommand('localAutocomplete.toggleWorkspaceContext', () =>
+      config().update('workspaceContext', !settings().workspaceContext, vscode.ConfigurationTarget.Global),
+    ),
+    indexer,
     vscode.window.onDidChangeActiveTextEditor(noteActive),
+    vscode.workspace.onDidChangeWorkspaceFolders(restartIndex),
+    // A new language extension adds file types worth indexing.
+    vscode.extensions.onDidChange(restartIndex),
     vscode.workspace.onDidChangeConfiguration((e) => {
+      // files.exclude decides what the index may read; files indexed before must go.
+      if (e.affectsConfiguration('files.exclude')) restartIndex();
       if (!e.affectsConfiguration('localAutocomplete')) return;
+      if (e.affectsConfiguration('localAutocomplete.disabledLanguages')) restartIndex();
+      else if (['workspaceContext', 'enabled', 'model'].some((k) => e.affectsConfiguration(`localAutocomplete.${k}`))) syncIndex();
       if (e.affectsConfiguration('localAutocomplete.endpoint')) {
         models.reset();
         checkEndpoint();
@@ -96,6 +121,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   render();
+  syncIndex();
   checkEndpoint();
 }
 

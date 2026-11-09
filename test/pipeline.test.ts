@@ -189,6 +189,8 @@ describe('readSettings', () => {
     expect(s.recentTabs).toBe(true);
     expect(s.recentTabsCount).toBe(3);
     expect(readSettings(src({ recentTabs: false, recentTabsCount: 50 }))).toMatchObject({ recentTabs: false, recentTabsCount: 10 });
+    expect(s.workspaceContext).toBe(true);
+    expect(readSettings(src({ workspaceContext: false })).workspaceContext).toBe(false);
   });
 });
 

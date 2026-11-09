@@ -96,6 +96,25 @@ export async function run(): Promise<void> {
       await vscode.commands.executeCommand('editor.action.inlineSuggest.commit');
     }
     assert.equal(call.lineAt(0).text, 'console.log("x", x)', 'auto-closed characters are replaced, not doubled');
+
+    // Phase 9: a closed file's definition reaches the prompt once the background index has it.
+    replies['/api/generate'] = { response: 'x', done: true, done_reason: 'stop' };
+    const usesInvoice = await vscode.workspace.openTextDocument({ language: 'typescript', content: 'const t = computeInvoiceTotal(cart);\n\n' });
+    const usesEditor = await vscode.window.showTextDocument(usesInvoice);
+    usesEditor.selection = new vscode.Selection(1, 0, 1, 0);
+    const snippet = '// File: invoice.ts (typescript)\nexport function computeInvoiceTotal';
+    const t1 = Date.now();
+    // Indexing starts 3 s after activation; force fresh requests until the snippet shows up.
+    for (let i = 0; i < 150 && !generates.some((g) => String(g.prompt).includes(snippet)); i++) {
+      await vscode.commands.executeCommand('editor.action.inlineSuggest.hide');
+      await vscode.commands.executeCommand('editor.action.inlineSuggest.trigger');
+      await sleep(100);
+    }
+    console.log(`workspace snippet appeared after ${Date.now() - t1} ms`);
+    assert.ok(generates.some((g) => String(g.prompt).includes(snippet)), 'the closed invoice.ts definition is sent');
+    for (const marker of ['NODE_MODULES_MARKER', 'GITIGNORED_MARKER', 'hunter2']) {
+      assert.ok(generates.every((g) => !String(g.prompt).includes(marker)), `${marker} is never sent`);
+    }
   } finally {
     server.close();
   }

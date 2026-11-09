@@ -2,8 +2,9 @@
   "name": "local-autocomplete",
   "displayName": "Local Autocomplete",
   "description": "Inline code completions from your local Ollama models. No cloud, no telemetry.",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "publisher": "linard-creative",
+  "icon": "assets/icon/icon.png",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -112,6 +113,11 @@
           "minimum": 1,
           "maximum": 10,
           "description": "How many recently used open files to include when Recent Tabs is on."
+        },
+        "localAutocomplete.workspaceContext": {
+          "type": "boolean",
+          "default": true,
+          "description": "Index the workspace in the background and send the most relevant snippets of other files as context. Secret, ignored and excluded files are never read."
         }
       }
     },
@@ -147,6 +153,11 @@
         "category": "Local Autocomplete"
       },
       {
+        "command": "localAutocomplete.toggleWorkspaceContext",
+        "title": "Toggle Workspace Context",
+        "category": "Local Autocomplete"
+      },
+      {
         "command": "localAutocomplete.openSettings",
         "title": "Open Extension Settings",
         "category": "Local Autocomplete"
@@ -176,7 +187,8 @@
     "package": "node -e \"require('fs').mkdirSync('output',{recursive:true})\" && vsce package --no-dependencies --out output/",
     "install:ext": "npm run package && node -e \"require('child_process').execSync('code --install-extension output/local-autocomplete-' + process.env.npm_package_version + '.vsix --force', { stdio: 'inherit' })\"",
     "uninstall:ext": "code --uninstall-extension linard-creative.local-autocomplete",
-    "bench": "esbuild scripts/bench.ts --bundle --platform=node --format=esm --outfile=dist/bench.mjs --log-level=warning && node dist/bench.mjs"
+    "bench": "esbuild scripts/bench.ts --bundle --platform=node --format=esm --outfile=dist/bench.mjs --log-level=warning && node dist/bench.mjs",
+    "bench:context": "esbuild scripts/bench-context.ts --bundle --platform=node --format=esm --outfile=dist/bench-context.mjs --log-level=warning && node dist/bench-context.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
