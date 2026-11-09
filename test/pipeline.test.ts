@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { endpointProblem, readSettings } from '../src/config';
 import { buildContext, isSecretFile, isSingleLine } from '../src/context';
-import { cleanCompletion, replacesRest } from '../src/filter';
+import { cleanCompletion, fitLine, replacesRest } from '../src/filter';
 import { buildRequest, fileHeader, findTemplate, recentBlock } from '../src/prompt';
 
 describe('buildContext', () => {
@@ -131,6 +131,33 @@ describe('cleanCompletion', () => {
 
   it('drops empty output', () => {
     expect(cleanCompletion('  \n\n', multi)).toBeUndefined();
+  });
+});
+
+describe('fitLine', () => {
+  it('replaces when replacesRest holds', () => {
+    expect(fitLine('console.log("', 'x", x)', '")')).toBe('replace');
+  });
+
+  it('drops a completion that unbalances a balanced line', () => {
+    expect(fitLine('foo(', 'a, b))', ')')).toBeUndefined();
+    expect(fitLine('log(', '"hello', ')')).toBeUndefined();
+    expect(fitLine('x = [', '1, 2}', ']')).toBeUndefined();
+  });
+
+  it('inserts balanced completions, escaped quotes included', () => {
+    expect(fitLine('foo(', 'a, b', ')')).toBe('insert');
+    expect(fitLine('x = foo(', '"a\\"b"', ')')).toBe('insert');
+  });
+
+  it('never drops on a line that was already unbalanced or has no rest', () => {
+    expect(fitLine('if (a && (b', ' || c', ') {')).toBe('insert');
+    expect(fitLine('const s = ', '"hello', '')).toBe('insert');
+    expect(fitLine('if (x) ', '{', '')).toBe('insert');
+  });
+
+  it('leaves multi-line text alone', () => {
+    expect(fitLine('foo(', 'a,\n  b', ')')).toBe('insert');
   });
 });
 

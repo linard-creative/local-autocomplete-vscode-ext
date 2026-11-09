@@ -83,3 +83,11 @@ export function replacesRest(before: string, text: string, rest: string): boolea
   for (const c of text) if (c === rest[i]) i++;
   return i === rest.length && balanced(before + text) && !balanced(before + text + rest);
 }
+
+/** How a single-line completion fits the cursor line: replace `rest`, insert before it, or undefined when it would break a balanced line. */
+export function fitLine(before: string, text: string, rest: string): 'insert' | 'replace' | undefined {
+  if (replacesRest(before, text, rest)) return 'replace';
+  // A non-empty rest is required, so a block opener like `{` at the end of a line still shows.
+  if (rest && !text.includes('\n') && balanced(before + rest) && !balanced(before + text + rest)) return undefined;
+  return 'insert';
+}

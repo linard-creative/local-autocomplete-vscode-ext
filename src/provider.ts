@@ -2,7 +2,7 @@ import { basename } from 'node:path';
 import * as vscode from 'vscode';
 import type { Settings } from './config';
 import { buildContext, isSecretFile } from './context';
-import { cleanCompletion, replacesRest } from './filter';
+import { cleanCompletion, fitLine } from './filter';
 import { settings, type ModelService } from './models';
 import { generate, OllamaError } from './ollama';
 import { buildRequest, recentBlock, type RecentFile } from './prompt';
@@ -155,17 +155,18 @@ export class LocalInlineCompletionProvider implements vscode.InlineCompletionIte
       // Stale: user kept typing, or switched models while this was generating.
       const stale = token.isCancellationRequested || settings().model !== s.model;
       const text = stale ? undefined : cleanCompletion(res.response, ctx, res.done_reason === 'length');
+      const line = document.lineAt(position).text;
+      const rest = line.slice(position.character).trimEnd();
+      const fit = text ? fitLine(line.slice(0, position.character), text, rest) : undefined;
 
       // Metadata only (spec §14): never the prompt or completion text.
       const ms = (ns?: number) => (ns === undefined ? '?' : Math.round(ns / 1e6));
       const tokS = res.eval_count && res.eval_duration ? (res.eval_count / (res.eval_duration / 1e9)).toFixed(1) : '?';
       this.log.debug(
-        `model=${s.model} prompt_chars=${body.prompt.length} recent_chars=${recent.length} total_ms=${Date.now() - started} load_ms=${ms(res.load_duration)} prompt_eval=${res.prompt_eval_count ?? '?'} prompt_ms=${ms(res.prompt_eval_duration)} eval_count=${res.eval_count ?? '?'} tok_s=${tokS} done=${res.done_reason ?? '?'} outcome=${stale ? 'stale' : text ? 'shown' : 'empty'}`,
+        `model=${s.model} prompt_chars=${body.prompt.length} recent_chars=${recent.length} total_ms=${Date.now() - started} load_ms=${ms(res.load_duration)} prompt_eval=${res.prompt_eval_count ?? '?'} prompt_ms=${ms(res.prompt_eval_duration)} eval_count=${res.eval_count ?? '?'} tok_s=${tokS} done=${res.done_reason ?? '?'} outcome=${stale ? 'stale' : !text ? 'empty' : !fit ? 'unbalanced' : 'shown'}`,
       );
-      if (!text) return;
-      const line = document.lineAt(position).text;
-      const rest = line.slice(position.character).trimEnd();
-      const end = replacesRest(line.slice(0, position.character), text, rest) ? position.translate(0, rest.length) : position;
+      if (!text || !fit) return;
+      const end = fit === 'replace' ? position.translate(0, rest.length) : position;
       return [new vscode.InlineCompletionItem(text, new vscode.Range(position, end))];
     } catch (e) {
       this.models.report(s.model, e instanceof OllamaError ? e : new OllamaError('invalid-response', String(e)));
