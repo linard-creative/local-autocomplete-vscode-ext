@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/icon/icon.png" alt="Local Autocomplete icon" width="128">
+  <img src="assets/icon/autocomplete-icon-png.png" alt="Local Autocomplete icon" width="128">
 </p>
 
 <h1 align="center">Local Autocomplete</h1>
