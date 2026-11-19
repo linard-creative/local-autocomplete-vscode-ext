@@ -24,6 +24,4 @@ Run typecheck, lint and test before calling a change done.
 
 ## Coding style
 
-Before writing or changing any code, invoke the `ponytail` skill (Skill tool) and follow it.
-
-@.claude/skills/ponytail/SKILL.md
+Follow ponytail (full level) on every coding task. It comes from the `ponytail@ponytail` plugin enabled in `.claude/settings.json`, whose hooks load the rules at session start, after compaction and in subagents. Before writing or changing code, invoke the `ponytail:ponytail` skill if its rules are not already in context. Switch level with `/ponytail lite|full|ultra|off`; review a diff with `/ponytail-review`.

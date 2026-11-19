@@ -16,5 +16,13 @@
       "Bash(ollama pull *)",
       "Bash(ollama rm *)"
     ]
+  },
+  "extraKnownMarketplaces": {
+    "ponytail": {
+      "source": { "source": "github", "repo": "DietrichGebert/ponytail" }
+    }
+  },
+  "enabledPlugins": {
+    "ponytail@ponytail": true
   }
 }
