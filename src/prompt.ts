@@ -158,18 +158,22 @@ export function recentBlock(files: RecentFile[], budget: number): string {
 		.join("");
 }
 
+/** A declaration name needs only a few tokens (spec §10, Phase 10). */
+export const NAME_TOKENS = 16;
+
 export function buildRequest(
 	ctx: CompletionContext,
 	file: FileInfo,
 	profile: ModelProfile,
 	s: Settings,
 	recent = "",
+	name = false,
 ): GenerateRequest {
 	// Recent files first: a stable start of the prompt is what Ollama's prompt cache can reuse.
 	const prompt = recent + fileHeader(file) + ctx.prefix;
-	const lineStop = isSingleLine(ctx) ? ["\n"] : [];
+	const lineStop = name || isSingleLine(ctx) ? ["\n"] : [];
 	const options = {
-		num_predict: s.maxTokens,
+		num_predict: name ? Math.min(s.maxTokens, NAME_TOKENS) : s.maxTokens,
 		temperature: s.temperature,
 		num_ctx: s.numCtx,
 		top_p: 0.9,

@@ -14,7 +14,7 @@ const docAt = (path: string, body = text) =>
     version: 1,
     getText: () => body,
     offsetAt: () => body.length,
-    lineAt: (l: unknown) => ({ text: typeof l === 'number' ? body.split('\n')[l] : '  ' }),
+    lineAt: (l: number | { line: number }) => ({ text: body.split('\n')[typeof l === 'number' ? l : l.line] }),
   }) as unknown as vscode.TextDocument;
 const doc = docAt('/w/a.ts');
 const pos = { line: 1, character: 2 } as vscode.Position;
@@ -39,7 +39,7 @@ function tokenSource() {
 }
 
 /** Generate calls stay pending until `respond` is called, and reject like real fetch when aborted. */
-let generates: { signal: AbortSignal; prompt: string; respond: (text: string) => void }[];
+let generates: { signal: AbortSignal; prompt: string; respond: (text: string, doneReason?: string) => void }[];
 let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
@@ -53,7 +53,7 @@ beforeEach(() => {
       generates.push({
         signal,
         prompt: JSON.parse(String(init.body)).prompt,
-        respond: (t) => resolve(Response.json({ response: t, done: true })),
+        respond: (t, doneReason) => resolve(Response.json({ response: t, done: true, done_reason: doneReason })),
       });
     });
   });
@@ -126,18 +126,20 @@ describe('provider concurrency', () => {
     expect(fetchMock.mock.calls.length).toBe(calls);
   });
 
-  it('sends recent tabs that are still open, most recent last, never secrets, closed tabs or the current file', async () => {
+  it('sends recent tabs that are still open, most recent last, never secrets, closed tabs, headerless languages or the current file', async () => {
     const { provider } = setup();
     const old = docAt('/w/old.ts', 'export const old = 1;\n');
     const restored = docAt('/w/types.ts', 'export type Id = string;\n');
+    const json = { ...docAt('/w/package.json', '{}\n'), languageId: 'json' } as vscode.TextDocument;
     const closed = docAt('/w/closed.ts', 'closed\n');
     const env = docAt('/w/.env', 'TOKEN=hunter2\n');
     const outside = docAt('/elsewhere/x.ts', 'outside\n');
     // `restored` has a tab but is not loaded yet, as after a restart; `closed` is still loaded but has no tab.
-    workspace.textDocuments = [old, closed, env, outside, doc];
+    // `json` has no line comment, so it must not use up one of the two slots.
+    workspace.textDocuments = [old, json, closed, env, outside, doc];
     Object.assign(workspace, { openTextDocument: () => Promise.resolve(restored) });
-    openTabs(old, restored, env, outside, doc);
-    for (const d of [old, restored, closed, env, outside, doc]) provider.noteActive(d);
+    openTabs(old, restored, json, env, outside, doc);
+    for (const d of [old, restored, json, closed, env, outside, doc]) provider.noteActive(d);
     config.recentTabsCount = 2;
     const p = provider.provideInlineCompletionItems(doc, pos, ctx, tokenSource().token);
     await vi.waitFor(() => expect(generates).toHaveLength(1));
@@ -268,5 +270,110 @@ describe('workspace context', () => {
     await vi.waitFor(() => expect(generates).toHaveLength(1));
     expect(generates[0].prompt).toBe('// File: a.ts (typescript)\n' + text);
     expect(excludes).toEqual([]);
+  });
+});
+
+describe('member types', () => {
+  const body = 'function f(acc: Account) {\n  acc.';
+  const at = { line: 1, character: 6 } as vscode.Position;
+  const account = docAt('/w/account.ts', 'export interface Account {\n  owner: string;\n  balance(): number;\n}\n');
+  const sym = (line: number, end: number, children: unknown[] = []) => ({
+    kind: SymbolKind.Interface,
+    range: { start: { line }, end: { line: end } },
+    selectionRange: { start: { line } },
+    children,
+  });
+  const lsp = (typeDef: unknown) => {
+    const calls: unknown[][] = [];
+    Object.assign(commands, {
+      executeCommand: (...args: unknown[]) => {
+        calls.push(args);
+        if (args[0] === 'vscode.executeTypeDefinitionProvider') return typeDef;
+        return Promise.resolve([sym(0, 3, [sym(1, 1), sym(2, 2)])]);
+      },
+    });
+    Object.assign(workspace, { openTextDocument: () => Promise.resolve(account) });
+    return calls;
+  };
+  const uri = (path: string) => ({ path, fsPath: path, toString: () => `file://${path}` });
+
+  it("sends the outline of the receiver's type right before the current file", async () => {
+    const calls = lsp(Promise.resolve([{ uri: uri('/w/account.ts'), range: { start: { line: 0 } } }]));
+    const { provider } = setup();
+    void provider.provideInlineCompletionItems(docAt('/w/a.ts', body), at, ctx, tokenSource().token);
+    await vi.waitFor(() => expect(generates).toHaveLength(1));
+    expect(generates[0].prompt).toBe(
+      '// File: account.ts (typescript)\nexport interface Account {\n  owner: string;\n  balance(): number;\n\n' +
+        '// File: a.ts (typescript)\n' +
+        body,
+    );
+    expect(calls[0][2]).toEqual({ line: 1, character: 4 }); // the `c` of `acc`, before the dot
+  });
+
+  it('sends nothing for secret or out-of-workspace targets, or without a member access', async () => {
+    for (const path of ['/w/.env', '/elsewhere/account.ts']) {
+      lsp(Promise.resolve([{ targetUri: uri(path), targetRange: { start: { line: 0 } } }]));
+      const { provider } = setup();
+      void provider.provideInlineCompletionItems(docAt('/w/a.ts', body), at, ctx, tokenSource().token);
+      await vi.waitFor(() => expect(generates).toHaveLength(1));
+      expect(generates.pop()!.prompt).toBe('// File: a.ts (typescript)\n' + body);
+    }
+    const calls = lsp(Promise.resolve([]));
+    void setup().provider.provideInlineCompletionItems(doc, pos, ctx, tokenSource().token);
+    await vi.waitFor(() => expect(generates).toHaveLength(1));
+    expect(calls.some((c) => c[0] === 'vscode.executeTypeDefinitionProvider')).toBe(false);
+  });
+
+  it('does not wait for a language server that never answers', async () => {
+    lsp(new Promise(() => {}));
+    void setup().provider.provideInlineCompletionItems(docAt('/w/a.ts', body), at, ctx, tokenSource().token);
+    await vi.waitFor(() => expect(generates).toHaveLength(1));
+    expect(generates[0].prompt).toBe('// File: a.ts (typescript)\n' + body);
+  });
+});
+
+describe('declaration names', () => {
+  const lastBody = () =>
+    JSON.parse(String(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/api/generate')).at(-1)![1].body));
+
+  it('suggests only a name at a declaration', async () => {
+    const { provider } = setup();
+    const p = provider.provideInlineCompletionItems(docAt('/w/n.ts', 'const userName = 1;\nconst u'), { line: 1, character: 7 } as vscode.Position, ctx, tokenSource().token);
+    await vi.waitFor(() => expect(generates).toHaveLength(1));
+    generates[0].respond('serName2 = 2;');
+    expect((await p)?.[0].insertText).toBe('serName2');
+    expect(lastBody().options.num_predict).toBe(16);
+  });
+
+  it('keeps the rest of the line after a name', async () => {
+    const { provider } = setup();
+    const p = provider.provideInlineCompletionItems(docAt('/w/n.ts', 'function get()'), { line: 0, character: 12 } as vscode.Position, ctx, tokenSource().token);
+    await vi.waitFor(() => expect(generates).toHaveLength(1));
+    generates[0].respond('User');
+    const item = (await p)?.[0] as unknown as { insertText: string; range: { start: unknown; end: unknown } };
+    expect(item.insertText).toBe('User');
+    expect(item.range.end).toEqual(item.range.start);
+  });
+
+  it('continues after a complete name, unless cut at the token limit', async () => {
+    const { provider } = setup();
+    const at = { line: 0, character: 16 } as vscode.Position;
+    const p1 = provider.provideInlineCompletionItems(docAt('/w/n.ts', 'function getUser'), at, ctx, tokenSource().token);
+    await vi.waitFor(() => expect(generates).toHaveLength(1));
+    generates[0].respond('(id: string) {');
+    expect((await p1)?.[0].insertText).toBe('(id: string) {');
+    const p2 = provider.provideInlineCompletionItems(docAt('/w/n.ts', 'function getUser'), at, ctx, tokenSource().token);
+    await vi.waitFor(() => expect(generates).toHaveLength(2));
+    generates[1].respond('(id: string, options: Opt', 'length');
+    expect(await p2).toBeUndefined();
+  });
+
+  it('leaves normal completions alone', async () => {
+    const { provider } = setup();
+    const p = provider.provideInlineCompletionItems(doc, pos, ctx, tokenSource().token);
+    await vi.waitFor(() => expect(generates).toHaveLength(1));
+    generates[0].respond('return a + b;');
+    expect((await p)?.[0].insertText).toBe('return a + b;');
+    expect(lastBody().options.num_predict).toBe(128);
   });
 });

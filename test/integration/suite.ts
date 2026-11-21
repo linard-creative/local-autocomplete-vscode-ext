@@ -115,6 +115,40 @@ export async function run(): Promise<void> {
     for (const marker of ['NODE_MODULES_MARKER', 'GITIGNORED_MARKER', 'hunter2']) {
       assert.ok(generates.every((g) => !String(g.prompt).includes(marker)), `${marker} is never sent`);
     }
+
+    // Phase 11: at `a.|` the outline of a's type sits right before the current file. A workspace definition snippet would include the `}`.
+    const pay = await vscode.window.showTextDocument(vscode.Uri.joinPath(root, 'pay.ts'));
+    pay.selection = new vscode.Selection(2, 4, 2, 4);
+    const typeOutline = '// File: account.ts (typescript)\nexport interface Account {\n  owner: string;\n  balance(): number;\n\n// File: pay.ts (typescript)';
+    const t2 = Date.now();
+    for (let i = 0; i < 100 && !generates.some((g) => String(g.prompt).includes(typeOutline)); i++) {
+      await vscode.commands.executeCommand('editor.action.inlineSuggest.hide');
+      await vscode.commands.executeCommand('editor.action.inlineSuggest.trigger');
+      await sleep(100);
+    }
+    console.log(`member type appeared after ${Date.now() - t2} ms`);
+    assert.ok(generates.some((g) => String(g.prompt).includes(typeOutline)), "the receiver's type outline is sent");
+
+    // Phase 10: typing a declaration name may open the word list (it offers `userName`); a request must still go out. Not proof the list was open.
+    replies['/api/generate'] = { response: 'serName2 = 2;', done: true, done_reason: 'stop' };
+    const decl = await vscode.workspace.openTextDocument({ language: 'typescript', content: 'const userName = 1;\n' });
+    const declEditor = await vscode.window.showTextDocument(decl);
+    declEditor.selection = new vscode.Selection(1, 0, 1, 0);
+    await vscode.commands.executeCommand('type', { text: 'const u' });
+    await sleep(500);
+    const before = generates.length;
+    for (let i = 0; i < 30 && generates.length === before; i++) {
+      await vscode.commands.executeCommand('editor.action.inlineSuggest.trigger');
+      await sleep(100);
+    }
+    assert.ok(generates.length > before, 'a declaration name still sends a request while the word list is open');
+    for (let i = 0; i < 50 && decl.lineAt(1).text === 'const u'; i++) {
+      await vscode.commands.executeCommand('editor.action.inlineSuggest.trigger');
+      await sleep(100);
+      await vscode.commands.executeCommand('editor.action.inlineSuggest.commit');
+    }
+    assert.equal(decl.lineAt(1).text, 'const userName2', 'only the name is inserted');
+    assert.equal((generates.at(-1)!.options as { num_predict: number }).num_predict, 16);
   } finally {
     server.close();
   }
