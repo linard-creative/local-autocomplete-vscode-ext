@@ -151,6 +151,10 @@ describe('WorkspaceIndexer lifecycle', () => {
     await vi.advanceTimersByTimeAsync(2000);
     expect(finds.length - before).toBe(1);
     expect(await invoicePaths(ix)).toEqual(['new/invoice.ts']);
+    // A new file the index would never read (a git lock, a log) triggers no rescan.
+    watcher.create!(uri('/w/.git/index.lock'));
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(finds.length - before).toBe(1);
   });
 
   it('files with the same path in two workspace folders are both indexed', async () => {

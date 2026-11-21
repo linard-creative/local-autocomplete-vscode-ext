@@ -126,18 +126,20 @@ describe('provider concurrency', () => {
     expect(fetchMock.mock.calls.length).toBe(calls);
   });
 
-  it('sends recent tabs that are still open, most recent last, never secrets, closed tabs or the current file', async () => {
+  it('sends recent tabs that are still open, most recent last, never secrets, closed tabs, headerless languages or the current file', async () => {
     const { provider } = setup();
     const old = docAt('/w/old.ts', 'export const old = 1;\n');
     const restored = docAt('/w/types.ts', 'export type Id = string;\n');
+    const json = { ...docAt('/w/package.json', '{}\n'), languageId: 'json' } as vscode.TextDocument;
     const closed = docAt('/w/closed.ts', 'closed\n');
     const env = docAt('/w/.env', 'TOKEN=hunter2\n');
     const outside = docAt('/elsewhere/x.ts', 'outside\n');
     // `restored` has a tab but is not loaded yet, as after a restart; `closed` is still loaded but has no tab.
-    workspace.textDocuments = [old, closed, env, outside, doc];
+    // `json` has no line comment, so it must not use up one of the two slots.
+    workspace.textDocuments = [old, json, closed, env, outside, doc];
     Object.assign(workspace, { openTextDocument: () => Promise.resolve(restored) });
-    openTabs(old, restored, env, outside, doc);
-    for (const d of [old, restored, closed, env, outside, doc]) provider.noteActive(d);
+    openTabs(old, restored, json, env, outside, doc);
+    for (const d of [old, restored, json, closed, env, outside, doc]) provider.noteActive(d);
     config.recentTabsCount = 2;
     const p = provider.provideInlineCompletionItems(doc, pos, ctx, tokenSource().token);
     await vi.waitFor(() => expect(generates).toHaveLength(1));

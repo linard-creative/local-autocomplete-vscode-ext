@@ -8,7 +8,7 @@ export interface Settings {
   temperature: number;
   maxContextChars: number;
   numCtx: number;
-  keepAlive: string;
+  keepAlive: string | number;
   disabledLanguages: string[];
   recentTabs: boolean;
   recentTabsCount: number;
@@ -43,6 +43,7 @@ export function endpointProblem(endpoint: string): 'invalid' | 'remote' | undefi
 
 export function readSettings(c: ConfigSource): Settings {
   const langs = c.get<unknown>('disabledLanguages');
+  const keepAlive = str(c.get('keepAlive'), '30m') || '30m';
   return {
     enabled: c.get<unknown>('enabled') !== false,
     endpoint: str(c.get('endpoint'), 'http://127.0.0.1:11434').replace(/\/+$/, ''),
@@ -53,7 +54,8 @@ export function readSettings(c: ConfigSource): Settings {
     temperature: num(c.get('temperature'), 0, 2, 0.2),
     maxContextChars: num(c.get('maxContextChars'), 500, 100000, 6000),
     numCtx: Math.round(num(c.get('numCtx'), 512, 131072, 4096)),
-    keepAlive: str(c.get('keepAlive'), '30m') || '30m',
+    // Ollama reads a string only as a duration with a unit; plain numbers ("-1" = forever, "3600" = seconds) must go as numbers.
+    keepAlive: /^-?\d+$/.test(keepAlive) ? Number(keepAlive) : keepAlive,
     disabledLanguages: Array.isArray(langs) ? langs.filter((l): l is string => typeof l === 'string') : [],
     recentTabs: c.get<unknown>('recentTabs') !== false,
     recentTabsCount: Math.round(num(c.get('recentTabsCount'), 1, 10, 3)),

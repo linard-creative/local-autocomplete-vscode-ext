@@ -11,14 +11,17 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
+    # The write token goes only to the two gh steps, never to npm install scripts (neither as env nor in .git/config).
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       # Changelog edits without a version bump (typo fixes) must not re-release.
       - name: Skip if this version is already released
         id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           V=$(node -p "require('./package.json').version")
           echo "V=$V" >> "$GITHUB_ENV"
@@ -53,4 +56,6 @@ jobs:
 
       - name: Create GitHub release with the .vsix
         if: steps.check.outputs.new
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: gh release create "v$V" "output/local-autocomplete-$V.vsix" --target "$GITHUB_SHA" --title "v$V" --notes-file notes.md

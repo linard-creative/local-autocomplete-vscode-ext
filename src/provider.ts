@@ -6,7 +6,7 @@ import { cleanCompletion, fitLine } from './filter';
 import { settings, type ModelService } from './models';
 import type { WorkspaceIndexer } from './indexer';
 import { generate, OllamaError } from './ollama';
-import { buildRequest, recentBlock, type RecentFile } from './prompt';
+import { buildRequest, fileHeader, recentBlock, type RecentFile } from './prompt';
 
 // Covers Ollama loading the model into memory, which can take several seconds.
 const COLD_TIMEOUT_MS = 30_000;
@@ -103,7 +103,8 @@ export class LocalInlineCompletionProvider implements vscode.InlineCompletionIte
         continue;
       // Tabs restored after a restart aren't loaded until shown; opening reads the file without showing it.
       const doc = loaded.get(key) ?? (await vscode.workspace.openTextDocument(uri).then((d) => d, () => undefined));
-      if (!doc || s.disabledLanguages.includes(doc.languageId)) continue;
+      // No line comment means no file header, so recentBlock would drop it; it must not take a slot.
+      if (!doc || s.disabledLanguages.includes(doc.languageId) || !fileHeader({ path: '', languageId: doc.languageId })) continue;
       files.push({ path: relPath(uri), languageId: doc.languageId, text: this.outline(doc) });
     }
     return files.reverse(); // most recent last, nearest the cursor

@@ -192,6 +192,13 @@ describe('readSettings', () => {
     expect(s.workspaceContext).toBe(true);
     expect(readSettings(src({ workspaceContext: false })).workspaceContext).toBe(false);
   });
+
+  it('sends plain-number keepAlive as a number, durations as text', () => {
+    expect(readSettings(src({ keepAlive: ' -1 ' })).keepAlive).toBe(-1);
+    expect(readSettings(src({ keepAlive: '3600' })).keepAlive).toBe(3600);
+    expect(readSettings(src({ keepAlive: '1h' })).keepAlive).toBe('1h');
+    expect(readSettings(src({})).keepAlive).toBe('30m');
+  });
 });
 
 describe('buildRequest', () => {

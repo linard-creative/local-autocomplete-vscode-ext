@@ -78,6 +78,7 @@ export class WorkspaceIndexer implements vscode.Disposable {
   private languages?: Map<string, string>;
   /** Only code files are listed, so the file cap is spent on code. */
   private include = '';
+  private exts = new Set<string>();
   private last?: { key: string; result: { files: RecentFile[]; kinds: string } };
 
   constructor(
@@ -150,7 +151,8 @@ export class WorkspaceIndexer implements vscode.Disposable {
     this.languages = languageMap();
     // shortcut: extensions with glob characters are left out of the include; none of the common languages have any.
     const exts = [...this.languages].filter(([e, id]) => indexable(id) && !/[{},*?[\]]/.test(e)).map(([e]) => e);
-    this.include = `**/*{${[...new Set(exts)].sort().join(',')}}`;
+    this.exts = new Set(exts);
+    this.include = `**/*{${[...this.exts].sort().join(',')}}`;
     this.watch();
     let left = MAX_FILES;
     for (const folder of vscode.workspace.workspaceFolders ?? []) {
@@ -300,6 +302,10 @@ export class WorkspaceIndexer implements vscode.Disposable {
 
   /** Creates are batched: one findFiles per folder lists new files, including those inside a renamed folder. */
   private noteCreated(uri: vscode.Uri): void {
+    // Only a code file or a folder (a rename) can add files, so git locks, logs and build output cost no rescan.
+    // shortcut: a folder renamed to a dotted name (`v1.2`) looks like a file and is missed until the next restart; stat it if that bites.
+    const ext = extname(uri.path).toLowerCase();
+    if (ext && !this.exts.has(ext)) return;
     const folder = vscode.workspace.getWorkspaceFolder(uri);
     if (!folder) return;
     this.created.set(folder.uri.toString(), folder);

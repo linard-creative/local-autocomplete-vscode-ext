@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Fix:** `keepAlive` set to a plain number such as `-1` (forever) no longer makes every request fail.
+- **Fix:** JSON, CSS, HTML and other tabs without a line comment no longer use up recent-tab slots, so `recentTabsCount` code files are sent.
+- Creating files the index never reads (git locks, logs, build output) no longer re-lists the workspace.
+- The release workflow gives its GitHub token only to the steps that need it.
+
 ## 0.9.0
 
 - **Workspace context:** suggestions can use code from files that aren't open, including the definition of a function or type you call from another file.
