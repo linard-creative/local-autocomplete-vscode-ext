@@ -55,3 +55,10 @@ export const isSecretFile = (path: string): boolean => SECRET.test(path);
 
 /** Code after the cursor on the same line means the completion must fit in that line. */
 export const isSingleLine = (ctx: CompletionContext): boolean => /\S/.test(ctx.suffix.split('\n', 1)[0]);
+
+// Keywords mirror DEF in retrieve.ts. Anchored at the line start so comments and strings never match.
+const DECL =
+  /^\s*(?:(?:export|default|declare|async|pub|abstract|static|public|private|protected)\s+)*(?:const|let|var|val|function\*?|class|interface|type|enum|struct|trait|def|fn|func)\s+(?:mut\s+)?([A-Za-z_$][\w$]*|)$/;
+
+/** The partial name when the cursor line (text before the cursor) is declaring one, '' right after the keyword. */
+export const declName = (before: string): string | undefined => DECL.exec(before)?.[1];

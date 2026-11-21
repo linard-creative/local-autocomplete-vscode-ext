@@ -10,6 +10,13 @@ export class Range {
   ) {}
 }
 
+export class Position {
+  constructor(
+    readonly line: number,
+    readonly character: number,
+  ) {}
+}
+
 export class InlineCompletionItem {
   constructor(
     readonly insertText: string,

@@ -14,6 +14,9 @@ writeFileSync(
   "import { readFileSync } from 'node:fs';\nexport interface User {\n  id: string;\n}\nexport function loadUser(id: string): User {\n  const raw = readFileSync(id, 'utf8');\n  return JSON.parse(raw);\n}\n",
 );
 writeFileSync(join(workspace, '.env'), 'TOKEN=hunter2\n');
+// Member types: the real TypeScript server resolves `a.`'s type to account.ts.
+writeFileSync(join(workspace, 'account.ts'), 'export interface Account {\n  owner: string;\n  balance(): number;\n}\n');
+writeFileSync(join(workspace, 'pay.ts'), "import type { Account } from './account';\nexport function pay(a: Account) {\n  a.\n}\n");
 // Workspace context: a file that is never opened, plus files the index must never read.
 writeFileSync(
   join(workspace, 'invoice.ts'),

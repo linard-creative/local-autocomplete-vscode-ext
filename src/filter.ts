@@ -91,3 +91,8 @@ export function fitLine(before: string, text: string, rest: string): 'insert' | 
   if (rest && !text.includes('\n') && balanced(before + rest) && !balanced(before + text + rest)) return undefined;
   return 'insert';
 }
+
+/** Name mode: only the identifier the model wrote; after a bare keyword its leading spaces go. */
+export function nameOnly(text: string, partial: string): string | undefined {
+  return /^[\w$]*/.exec(partial ? text : text.trimStart())![0] || undefined;
+}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { endpointProblem, readSettings } from '../src/config';
-import { buildContext, isSecretFile, isSingleLine } from '../src/context';
-import { cleanCompletion, fitLine, replacesRest } from '../src/filter';
+import { buildContext, declName, isSecretFile, isSingleLine } from '../src/context';
+import { cleanCompletion, fitLine, nameOnly, replacesRest } from '../src/filter';
 import { buildRequest, fileHeader, findTemplate, recentBlock } from '../src/prompt';
 
 describe('buildContext', () => {
@@ -239,6 +239,39 @@ describe('buildRequest', () => {
   it('puts recent files before the current file header', () => {
     const body = buildRequest({ prefix: 'x', suffix: '' }, file, { insert: true }, s, '// File: b.ts (typescript)\nb\n\n');
     expect(body.prompt).toBe('// File: b.ts (typescript)\nb\n\n# File: src/a.py (python)\nx');
+  });
+
+  it('caps a name request at 16 tokens with a newline stop, and never raises maxTokens', () => {
+    const ctx = { prefix: 'const u', suffix: '\n' };
+    const native = buildRequest(ctx, file, { insert: true }, s, '', true);
+    expect(native.options?.num_predict).toBe(16);
+    expect(native.options?.stop).toEqual(['\n']);
+    expect(buildRequest(ctx, file, { insert: true }, { ...s, maxTokens: 8 }, '', true).options?.num_predict).toBe(8);
+    expect(buildRequest(ctx, file, { insert: true }, s).options?.num_predict).toBe(s.maxTokens);
+  });
+});
+
+describe('declaration names', () => {
+  it('detects a declaration name with its partial', () => {
+    for (const kw of ['const', 'let', 'var', 'val', 'function', 'class', 'interface', 'type', 'enum', 'struct', 'trait', 'def', 'fn', 'func'])
+      expect(declName(`${kw} us`)).toBe('us');
+    expect(declName('const ')).toBe('');
+    expect(declName('  export default async function get')).toBe('get');
+    expect(declName('pub fn ma')).toBe('ma');
+    expect(declName('let mut co')).toBe('co');
+    expect(declName('export const $el')).toBe('$el');
+  });
+
+  it('ignores non-declarations, comments, strings and destructuring', () => {
+    for (const line of ['let x = u', 'return u', 'constant', 'const', '// we use const u', 'x = "type U', 'const { a', 'const [a, ', 'const 1'])
+      expect(declName(line)).toBeUndefined();
+  });
+
+  it('keeps only the name the model wrote', () => {
+    expect(nameOnly('serName = 1;', 'u')).toBe('serName');
+    expect(nameOnly(' userName = 1;', '')).toBe('userName');
+    expect(nameOnly(' = 1;', 'u')).toBeUndefined();
+    expect(nameOnly('{ a, b }', '')).toBeUndefined();
   });
 });
 

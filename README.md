@@ -91,7 +91,7 @@ Never read: secret files (see Privacy), files over 256 KB, binary and minified f
 
 ## Privacy
 
-- The only network peer is the configured endpoint. What is sent: the code around the cursor and its workspace-relative path, never the absolute path. With **Recent Tabs** on, also an outline of your 3 most recently used tabs that are still open inside the workspace: their declaration lines, or the top of the file until the outline is ready. With **Workspace Context** on, also up to 2 snippets of other files in the workspace (see Workspace context).
+- The only network peer is the configured endpoint. What is sent: the code around the cursor and its workspace-relative path, never the absolute path. With **Recent Tabs** on, also an outline of your 3 most recently used tabs that are still open inside the workspace: their declaration lines, or the top of the file until the outline is ready. With **Workspace Context** on, also up to 2 snippets of other files in the workspace (see Workspace context). After `obj.`, also the outline of obj's type when the language server finds it in a workspace file.
 - `endpoint` and `model` are machine-scoped. A cloned repository's `.vscode/settings.json` cannot redirect your code to another server.
 - A non-local endpoint (anything other than `localhost`, `127.x` or `::1`) shows a warning once per session.
 - The **Local Autocomplete** output channel logs metadata only (model, timings, sizes), never code, prompts or completions.

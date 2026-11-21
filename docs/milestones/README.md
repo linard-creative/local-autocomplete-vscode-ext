@@ -13,6 +13,8 @@ One file per finished roadmap phase (spec §19). Add a file when a phase ships a
 | 7. Auto-closed suffix | Done | 0.7.0 | [phase-7.md](phase-7.md) |
 | 8. Balanced completions | Done | 0.8.0 | [phase-8.md](phase-8.md) |
 | 9. Workspace context | Done | 0.9.0 | [phase-9.md](phase-9.md) |
+| 10. Declaration names | Done | unreleased | [phase-10.md](phase-10.md) |
+| 11. Member types | Done (manual check pending) | unreleased | [phase-11.md](phase-11.md) |
 
 ## Phases
 
@@ -51,5 +53,9 @@ Two more filter rules. Multi-line: cut a closing bracket the code after the curs
 ### 9. Workspace context — done
 
 A background, in-memory index of the workspace. Each suggestion gets up to 2 snippets of other files, including closed ones: the definition of a name used near the cursor, or similar code, and nothing when nothing clearly matches. Performance budgets run in `npm test`; `npm run bench:context` measures hit vs noise. Design: [2026-11-10-workspace-context-design.md](../superpowers/specs/2026-11-10-workspace-context-design.md), plan: [2026-11-10-workspace-context.md](../superpowers/plans/2026-11-10-workspace-context.md).
+
+### 10. Declaration names — done
+
+At `const u|`, `function get|` or `type |`, the ghost text is only the rest of the name, drawn from the same context as every suggestion. Design: [2026-11-21-declaration-names-design.md](../superpowers/specs/2026-11-21-declaration-names-design.md), plan: [2026-11-21-declaration-names.md](../superpowers/plans/2026-11-21-declaration-names.md).
 
 Each phase file contains: what shipped, acceptance status (spec §19), and any decisions or deviations from the spec.

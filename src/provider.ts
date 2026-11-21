@@ -1,8 +1,8 @@
 import { basename } from 'node:path';
 import * as vscode from 'vscode';
 import type { Settings } from './config';
-import { buildContext, isSecretFile } from './context';
-import { cleanCompletion, fitLine } from './filter';
+import { buildContext, declName, isSecretFile } from './context';
+import { cleanCompletion, fitLine, nameOnly } from './filter';
 import { settings, type ModelService } from './models';
 import type { WorkspaceIndexer } from './indexer';
 import { generate, OllamaError } from './ollama';
@@ -39,6 +39,19 @@ function outlineText(doc: vscode.TextDocument, symbols: (vscode.DocumentSymbol |
   return [...lines].sort((a, b) => a - b).map((l) => doc.lineAt(l).text.trimEnd()).join('\n') + '\n';
 }
 
+type Symbols = (vscode.DocumentSymbol | vscode.SymbolInformation)[];
+
+/** Innermost symbol whose name is on `line`. Lines, not ranges: type definitions point at the name. */
+function symbolOn(list: Symbols, line: number): vscode.DocumentSymbol | undefined {
+  for (const sym of list) {
+    if (!('selectionRange' in sym) || line < sym.range.start.line || line > sym.range.end.line) continue;
+    return sym.selectionRange.start.line === line ? sym : symbolOn(sym.children, line);
+  }
+}
+
+// The language server gets this long before the completion goes ahead without the receiver's type; a late answer is cached for the next request.
+const TYPE_WAIT_MS = 300;
+
 // Full text, LF only like the current file's context (recentBlock cuts it to a head).
 const head = (doc: vscode.TextDocument) => doc.getText().replace(/\r\n/g, '\n');
 
@@ -61,6 +74,7 @@ export class LocalInlineCompletionProvider implements vscode.InlineCompletionIte
   /** File URIs in the order they were last active, most recent first. Persisted per workspace by extension.ts. */
   recent: string[] = [];
   private outlines = new Map<string, { version: number; text?: string }>();
+  private typeCache?: { key: string; text?: string };
   /** Background workspace index, set by extension.ts (spec §10, Phase 9). */
   workspace?: Pick<WorkspaceIndexer, 'snippets'>;
 
@@ -130,6 +144,36 @@ export class LocalInlineCompletionProvider implements vscode.InlineCompletionIte
     return head(doc);
   }
 
+  /**
+   * At `obj.|` or `obj.na|`: the outline of obj's type from the language server, so the model sees the real members instead of guessing.
+   * Same file rules as recent tabs: workspace files only, never secrets or disabled languages.
+   * shortcut: identifier receivers only (`a.b.`, not `f().` or `a[0].`), upgrade if logs show misses.
+   */
+  private async memberType(doc: vscode.TextDocument, position: vscode.Position, s: Settings): Promise<RecentFile[]> {
+    const m = /\w\.\w*$/.exec(doc.lineAt(position).text.slice(0, position.character));
+    if (!m) return [];
+    const locs = await vscode.commands.executeCommand<(vscode.Location | vscode.LocationLink)[] | undefined>(
+      'vscode.executeTypeDefinitionProvider',
+      doc.uri,
+      new vscode.Position(position.line, m.index),
+    );
+    const loc = locs?.[0];
+    if (!loc) return [];
+    const [uri, line] = 'targetUri' in loc ? [loc.targetUri, (loc.targetSelectionRange ?? loc.targetRange).start.line] : [loc.uri, loc.range.start.line];
+    if (!vscode.workspace.getWorkspaceFolder(uri) || isSecretFile(uri.fsPath)) return [];
+    const target = await vscode.workspace.openTextDocument(uri);
+    if (s.disabledLanguages.includes(target.languageId)) return [];
+    const key = `${uri.toString()}@${target.version}:${line}`;
+    if (this.typeCache?.key !== key) {
+      const symbols = await vscode.commands.executeCommand<Symbols | undefined>('vscode.executeDocumentSymbolProvider', uri);
+      const sym = symbols && symbolOn(symbols, line);
+      // Children listed explicitly: a type alias isn't a container kind, but its members are what the model needs.
+      this.typeCache = { key, text: sym && outlineText(target, [sym, ...sym.children]) };
+    }
+    const text = this.typeCache.text;
+    return text ? [{ path: relPath(uri), languageId: target.languageId, text }] : [];
+  }
+
   async provideInlineCompletionItems(
     document: vscode.TextDocument,
     position: vscode.Position,
@@ -143,6 +187,8 @@ export class LocalInlineCompletionProvider implements vscode.InlineCompletionIte
     if (context.selectedCompletionInfo) return;
     // Cursor inside an identifier: completions there are almost always wrong.
     if (/^\w/.test(document.lineAt(position).text.slice(position.character))) return;
+    // Declaring something: suggest just its name (spec §10, Phase 10).
+    const name = declName(document.lineAt(position).text.slice(0, position.character));
     if (Date.now() < this.models.offlineUntil) return;
     if (!(await delay(s.debounceMs, token))) return;
 
@@ -153,6 +199,11 @@ export class LocalInlineCompletionProvider implements vscode.InlineCompletionIte
     const timeout = this.models.isCold(s.model) ? Math.max(s.requestTimeoutMs, COLD_TIMEOUT_MS) : s.requestTimeoutMs;
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(timeout)]);
     try {
+      // Started first so the language server works while the rest of the context is gathered.
+      const typeFiles = Promise.race([
+        this.memberType(document, position, s).catch((): RecentFile[] => []),
+        new Promise<RecentFile[]>((r) => setTimeout(r, TYPE_WAIT_MS, [])),
+      ]);
       const profile = await this.models.profile(s, signal);
       const ctx = buildContext(document.getText(), document.offsetAt(position), s.maxContextChars);
       // Recent tabs and workspace snippets each get a quarter of the current file's budget on top of it.
@@ -167,15 +218,18 @@ export class LocalInlineCompletionProvider implements vscode.InlineCompletionIte
           : undefined;
       const wsMs = Date.now() - wsStarted;
       const wsBlock = ws ? recentBlock(ws.files, budget) : '';
-      // Most stable first, so Ollama's prompt cache keeps as much as possible.
-      const body = buildRequest(ctx, { path, languageId: document.languageId }, profile, s, recent + wsBlock);
+      const typeBlock = recentBlock(await typeFiles, budget);
+      // Most stable first, so Ollama's prompt cache keeps as much as possible; the receiver's type changes the most.
+      const body = buildRequest(ctx, { path, languageId: document.languageId }, profile, s, recent + wsBlock + typeBlock, name !== undefined);
 
       const started = Date.now();
       const res = await generate(s.endpoint, body, signal);
       this.models.report(s.model);
       // Stale: user kept typing, or switched models while this was generating.
       const stale = token.isCancellationRequested || settings().model !== s.model;
-      const text = stale ? undefined : cleanCompletion(res.response, ctx, res.done_reason === 'length');
+      let text = stale ? undefined : cleanCompletion(res.response, ctx, res.done_reason === 'length');
+      // A typed name the model treats as complete keeps its one-line continuation, unless the token cap cut it.
+      if (text && name !== undefined) text = nameOnly(text, name) ?? (name && res.done_reason !== 'length' ? text : undefined);
       const line = document.lineAt(position).text;
       const rest = line.slice(position.character).trimEnd();
       const fit = text ? fitLine(line.slice(0, position.character), text, rest) : undefined;
@@ -184,7 +238,7 @@ export class LocalInlineCompletionProvider implements vscode.InlineCompletionIte
       const ms = (ns?: number) => (ns === undefined ? '?' : Math.round(ns / 1e6));
       const tokS = res.eval_count && res.eval_duration ? (res.eval_count / (res.eval_duration / 1e9)).toFixed(1) : '?';
       this.log.debug(
-        `model=${s.model} prompt_chars=${body.prompt.length} recent_chars=${recent.length} workspace_chars=${wsBlock.length} workspace_ms=${wsMs} workspace_hits=${ws?.kinds || '-'} total_ms=${Date.now() - started} load_ms=${ms(res.load_duration)} prompt_eval=${res.prompt_eval_count ?? '?'} prompt_ms=${ms(res.prompt_eval_duration)} eval_count=${res.eval_count ?? '?'} tok_s=${tokS} done=${res.done_reason ?? '?'} outcome=${stale ? 'stale' : !text ? 'empty' : !fit ? 'unbalanced' : 'shown'}`,
+        `model=${s.model} prompt_chars=${body.prompt.length} recent_chars=${recent.length} workspace_chars=${wsBlock.length} workspace_ms=${wsMs} workspace_hits=${ws?.kinds || '-'} type_chars=${typeBlock.length} total_ms=${Date.now() - started} load_ms=${ms(res.load_duration)} prompt_eval=${res.prompt_eval_count ?? '?'} prompt_ms=${ms(res.prompt_eval_duration)} eval_count=${res.eval_count ?? '?'} tok_s=${tokS} done=${res.done_reason ?? '?'} mode=${name === undefined ? 'code' : 'name'} outcome=${stale ? 'stale' : !text ? 'empty' : !fit ? 'unbalanced' : 'shown'}`,
       );
       if (!text || !fit) return;
       const end = fit === 'replace' ? position.translate(0, rest.length) : position;
