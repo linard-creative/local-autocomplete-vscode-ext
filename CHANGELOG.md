@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.10.0
 
 - **Declaration names:** when you start a declaration (`const u`, `function get`, `type `, `def `), the suggestion is just the name, picked from the current file and your other files, instead of a whole statement.
 - **Member types:** after `obj.`, the suggestion sees the members of obj's type, taken from the language server, so it stops inventing methods and fields. Only types defined in workspace files are sent, never secret files. If the language server takes over 300 ms, the suggestion goes ahead without it.
@@ -8,6 +8,7 @@
 - **Fix:** JSON, CSS, HTML and other tabs without a line comment no longer use up recent-tab slots, so `recentTabsCount` code files are sent.
 - Creating files the index never reads (git locks, logs, build output) no longer re-lists the workspace.
 - The release workflow gives its GitHub token only to the steps that need it.
+- Every merge to `main` now runs the release workflow. If the version is already released, the rebuilt `.vsix` and notes replace the ones on that release.
 
 ## 0.9.0
 

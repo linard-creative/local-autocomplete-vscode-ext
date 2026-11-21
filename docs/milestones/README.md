@@ -13,8 +13,8 @@ One file per finished roadmap phase (spec §19). Add a file when a phase ships a
 | 7. Auto-closed suffix | Done | 0.7.0 | [phase-7.md](phase-7.md) |
 | 8. Balanced completions | Done | 0.8.0 | [phase-8.md](phase-8.md) |
 | 9. Workspace context | Done | 0.9.0 | [phase-9.md](phase-9.md) |
-| 10. Declaration names | Done | unreleased | [phase-10.md](phase-10.md) |
-| 11. Member types | Done (manual check pending) | unreleased | [phase-11.md](phase-11.md) |
+| 10. Declaration names | Done | 0.10.0 | [phase-10.md](phase-10.md) |
+| 11. Member types | Done (manual check pending) | 0.10.0 | [phase-11.md](phase-11.md) |
 
 ## Phases
 
