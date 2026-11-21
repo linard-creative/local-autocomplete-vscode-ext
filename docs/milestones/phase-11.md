@@ -1,4 +1,4 @@
-# Phase 11 — Member types (unreleased)
+# Phase 11 — Member types (0.10.0)
 
 Numbered 11 because Phase 10 (declaration names) was claimed in parallel.
 

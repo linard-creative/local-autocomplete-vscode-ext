@@ -1,4 +1,4 @@
-# Phase 10 — Declaration names (unreleased)
+# Phase 10 — Declaration names (0.10.0)
 
 Design: [2026-11-21-declaration-names-design.md](../superpowers/specs/2026-11-21-declaration-names-design.md). Plan: [2026-11-21-declaration-names.md](../superpowers/plans/2026-11-21-declaration-names.md).
 
@@ -23,4 +23,4 @@ Design: [2026-11-21-declaration-names-design.md](../superpowers/specs/2026-11-21
 - The open risk was the word list hiding the name. The integration check could not show the list was open; the user's manual check (2026-11-21) found it works, so the "extend the selected word" fallback (plan Task 4) was not needed.
 - Final review: a complete typed name (`function getUser`) showed nothing, a regression against the plain continuation. It now keeps the one-line continuation unless truncated; this widens the design's "nothing after the name" rule.
 - `declName` is anchored at the line start, so `for (const x|` gets no name mode; comments and strings never do.
-- Numbered 10 with phase 11 (member types) built in parallel; neither is released, so no version bump yet.
+- Numbered 10 with phase 11 (member types) built in parallel; both ship in 0.10.0, one minor bump for the two phases.
